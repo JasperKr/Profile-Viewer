@@ -15,11 +15,13 @@ local screenPos = Imgui.ImVec2_Float(0, 0)
 local function transformPoint(x, y)
     Imgui.GetCursorScreenPos(screenPos)
 
+    ---@diagnostic disable-next-line: undefined-field
     return screenPos.x + x, screenPos.y + y
 end
 local function inverseTransformPoint(x, y)
     Imgui.GetCursorScreenPos(screenPos)
 
+    ---@diagnostic disable-next-line: undefined-field
     return x - screenPos.x, y - screenPos.y
 end
 
@@ -121,10 +123,10 @@ local function handleDrag(frameXStart, frameXEnd, frameCount, floor)
     Imgui.GetWindowPos(windowPos)
     Imgui.GetWindowSize(windowSize)
 
-    local windowMinX = windowPos.x
-    local windowMinY = windowPos.y
-    local windowMaxX = windowPos.x + windowSize.x
-    local windowMaxY = windowPos.y + windowSize.y
+    ---@diagnostic disable-next-line: undefined-field
+    local windowMinX, windowMinY = windowPos.x, windowPos.y
+    ---@diagnostic disable-next-line: undefined-field
+    local windowMaxX, windowMaxY = windowPos.x + windowSize.x, windowPos.y + windowSize.y
 
     local inAABB = pointAABB(mx, my, windowMinX, windowMinY, windowMaxX, windowMaxY)
 
@@ -407,14 +409,16 @@ local function drawFrameList(width, height)
 
             for groupIdx, group in ipairs(Groups) do
                 local gInfo = info.groupInfo[group.name]
-                if gInfo and gInfo.valid then
-                    if gInfo.type == "time" then
-                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
-                            "Delta:" .. Stringh.formatTime(gInfo.difference))
-                    elseif gInfo.type == "byte" then
-                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
-                            "Delta:" .. Stringh.formatBytes(gInfo.difference, false))
-                    end
+                if group.type == "time" then
+                    tooltipItem = tooltipItem .. string.format("%s: %s; %s\n", group.name,
+                        Stringh.formatBytes(Frames[i][#Frames[i]].data[groupIdx].stop, false),
+                        "Delta:" .. (gInfo.valid and Stringh.formatTime(gInfo.difference) or "N/A"))
+                elseif group.type == "byte" then
+                    tooltipItem = tooltipItem .. string.format("%s: %s; %s\n", group.name,
+                        Stringh.formatBytes(Frames[i][#Frames[i]].data[groupIdx].stop, false),
+                        "Delta:" .. (gInfo.valid and Stringh.formatBytes(gInfo.difference, false) or "N/A"))
+                else
+                    error("Unknown group type: " .. tostring(group.type))
                 end
             end
         end
@@ -474,7 +478,11 @@ local function drawFrameGraph(width, height)
         local lastEvent = Frames[i][#Frames[i]]
 
         for groupIdx, group in ipairs(Groups) do
-            local value = lastEvent.data[groupIdx].stop - firstEvent.data[groupIdx].start
+            local value = lastEvent.data[groupIdx].stop
+
+            if group.type == "time" then
+                value = value - firstEvent.data[groupIdx].start
+            end
 
             local range = viewRanges[group.name]
             local y = (value + range.offset) * range.scale * height
@@ -506,14 +514,18 @@ local function drawFrameGraph(width, height)
 
             for groupIdx, group in ipairs(Groups) do
                 local gInfo = info.groupInfo[group.name]
-                if gInfo and gInfo.valid then
-                    if gInfo.type == "time" then
-                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
-                            "Delta:" .. Stringh.formatTime(gInfo.difference))
-                    elseif gInfo.type == "byte" then
-                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
-                            "Delta:" .. Stringh.formatBytes(gInfo.difference, false))
-                    end
+                if group.type == "time" then
+                    tooltipItem = tooltipItem ..
+                        string.format("%s: %s; %s\n", group.name,
+                            Stringh.formatBytes(frameAtCursor[#frameAtCursor].data[groupIdx].stop, false),
+                            "Delta:" .. (gInfo.valid and Stringh.formatTime(gInfo.difference) or "N/A"))
+                elseif group.type == "byte" then
+                    tooltipItem = tooltipItem ..
+                        string.format("%s: %s; %s\n", group.name,
+                            Stringh.formatBytes(frameAtCursor[#frameAtCursor].data[groupIdx].stop, false),
+                            "Delta:" .. (gInfo.valid and Stringh.formatBytes(gInfo.difference, false) or "N/A"))
+                else
+                    error("Unknown group type: " .. tostring(group.type))
                 end
             end
 

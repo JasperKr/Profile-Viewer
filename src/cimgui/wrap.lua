@@ -2290,7 +2290,6 @@ M.GetColumnsCount = M.GetColumnsCount or function()
     return out
 end
 
----@return ImVec2, number
 M.GetContentRegionAvail = M.GetContentRegionAvail or function(o1)
     jit.off(true)
     o1 = o1 or M.ImVec2_Nil()
@@ -2424,7 +2423,6 @@ M.GetItemRectMin = M.GetItemRectMin or function(o1)
     return o1, out
 end
 
----@return ImVec2, number
 M.GetItemRectSize = M.GetItemRectSize or function(o1)
     jit.off(true)
     o1 = o1 or M.ImVec2_Nil()

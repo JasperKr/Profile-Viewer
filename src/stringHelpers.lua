@@ -187,7 +187,7 @@ function stringh.shallowPrintTable(t, floor)
             else
                 if floor then
                     if type(v) == "number" then
-                        io.write("\t" .. tostring(i) .. " = " .. Rhodium.math.round(v) .. "\n")
+                        io.write("\t" .. tostring(i) .. " = " .. math.floor(v + 0.5) .. "\n")
                     else
                         io.write("\t" .. tostring(i) .. " = " .. v .. "\n")
                     end

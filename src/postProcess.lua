@@ -31,6 +31,9 @@ end
 
 Differences = {}
 
+local lowest = math.huge
+local highest = -math.huge
+
 for i, frame in ipairs(Frames) do
     local firstEvent = frame[1]
     local lastEvent = frame[#frame]
@@ -40,8 +43,21 @@ for i, frame in ipairs(Frames) do
                 Differences[group.name] = {}
             end
 
-            local diff = lastEvent.data[groupIdx].stop - firstEvent.data[groupIdx].start
+            local diff = lastEvent.data[groupIdx].stop
+
+            if group.type == "time" then
+                diff = diff - firstEvent.data[groupIdx].start
+            end
+
+            if lastEvent.data[groupIdx].stop == -math.huge or firstEvent.data[groupIdx].start == -math.huge then
+                goto continue
+            end
+
             table.insert(Differences[group.name], diff)
+
+            lowest = math.min(lowest, diff)
+            highest = math.max(highest, diff)
+            ::continue::
         end
     end
 end
@@ -57,8 +73,41 @@ end
 Percentiles = {}
 
 for groupName, diffs in pairs(Differences) do
+    local p = 3
+
     Percentiles[groupName] = {
-        low = percentile(diffs, 3),
-        high = percentile(diffs, 97),
+        low = percentile(Differences[groupName], p),
+        high = percentile(Differences[groupName], 100 - p),
     }
+
+    print(Percentiles[groupName].low, Percentiles[groupName].high)
+
+    if lowest == highest then
+        Percentiles[groupName].low = lowest * 0.9
+        Percentiles[groupName].high = highest * 1.1
+
+        print("Lowest equals highest, adjusting percentiles to:", Percentiles[groupName].low, Percentiles[groupName]
+            .high)
+    end
+
+    while Percentiles[groupName].low == Percentiles[groupName].high do
+        p = p / 2
+
+        Percentiles[groupName].low = percentile(Differences[groupName], p)
+        Percentiles[groupName].high = percentile(Differences[groupName], 100 - p)
+
+        print("Adjusted percentiles to:", Percentiles[groupName].low, Percentiles[groupName].high)
+    end
+
+    if Percentiles[groupName].low > 0 then
+        Percentiles[groupName].low = Percentiles[groupName].low * 0.975
+    else
+        Percentiles[groupName].low = Percentiles[groupName].low * 1.025
+    end
+
+    if Percentiles[groupName].high > 0 then
+        Percentiles[groupName].high = Percentiles[groupName].high * 1.025
+    else
+        Percentiles[groupName].high = Percentiles[groupName].high * 0.975
+    end
 end

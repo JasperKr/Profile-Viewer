@@ -23,6 +23,7 @@ local mountDirectory = "Profile/"
 local profileDir = Stringh.directory(profileFullPath)
 local path = (mountDirectory .. Stringh.filename(profileFullPath)):gsub("\\", "/")
 
+---@diagnostic disable-next-line: undefined-field
 assert(love.filesystem.mountFullPath(profileDir, mountDirectory, "read"))
 local fields = {}
 local repl = function(c) table.insert(fields, c) end
@@ -106,8 +107,6 @@ local function generateCreateEntryFunction(format)
     for groupIdx, group in ipairs(groups) do
         add("entry.data[" .. groupIdx .. "] = {")
         indent()
-        -- add(string.format("name = \"%s\",", group[1].name))
-        -- add(string.format("type = \"%s\",", group[1].type))
         for _, item in ipairs(group) do
             local entryName = item.when == "start" and "start" or
                 (item.when == "end" and "stop" or error("Invalid 'when' value: " .. tostring(item.when)))
@@ -143,6 +142,7 @@ local colors = {
     { 0.1, 0.5, 0.9 },
 }
 
+---@diagnostic disable-next-line: undefined-field
 local file = love.filesystem.openFile(path, "r")
 local filestring = file:read()
 
@@ -173,6 +173,7 @@ for str in lines(filestring) do
     end
 end
 
+---@diagnostic disable-next-line: undefined-field
 love.filesystem.unmountFullPath(profileDir)
 
 GroupNameToIndex = {}
