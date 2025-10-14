@@ -1,15 +1,38 @@
+local ffi = require "ffi"
 local header
 local wordCache = {}
 
-local profilerPath = "/LOVE/Rhodium/profiler.csv"
+local love_os = love.system.getOS()
+
+local profileFullPath
+local profilerPath
+
+if love_os == "Windows" then
+    profilerPath = "/LOVE/Rhodium/profiler.csv"
+    local appdata = assert(os.getenv("APPDATA"))
+    profileFullPath = (appdata .. profilerPath):gsub("\\", "/")
+elseif love_os == "Linux" then
+    local home = assert(os.getenv("HOME"))
+    profilerPath = "/.local/share/love/Rhodium/profiler.csv"
+    profileFullPath = home .. profilerPath
+end
+
+
 local mountDirectory = "Profile/"
 
-local appdata = assert(os.getenv("APPDATA"))
-local profileFullPath = (appdata .. profilerPath):gsub("\\", "/")
 local profileDir = Stringh.directory(profileFullPath)
 local path = (mountDirectory .. Stringh.filename(profileFullPath)):gsub("\\", "/")
 
 assert(love.filesystem.mountFullPath(profileDir, mountDirectory, "read"))
+local fields = {}
+local repl = function(c) table.insert(fields, c) end
+
+local function split(str, sep)
+    table.clear(fields)
+    local pattern = string.format("([^%s]+)", sep)
+    string.gsub(str, pattern, repl)
+    return fields
+end
 
 local function getWords(str)
     local i = 1
@@ -35,10 +58,97 @@ local function lines(s)
     end
 end
 
+--[[
+local format = { "name:name", "type:type" }
+local function addItemToFormat(name, type)
+    assert(name and type, "Name or type is nil")
+    assert(type == "time" or type == "byte", "Type must be 'time' or 'byte'")
+    table.insert(format, name .. ":" .. type .. ":start")
+    table.insert(format, name .. ":" .. type .. ":end")
+end
+]]
+
+-- format might look like:
+-- "name:name,type:type,time:time:start,time:time:end,memory:byte:start,memory:byte:end,graphicsMemory:byte:start,graphicsMemory:byte:end"
+
+local function generateCreateEntryFunction(format)
+    local str = ""
+    local indentation = 0
+
+    local function add(what)
+        str = str .. string.rep(" ", indentation * 4) .. what .. "\n"
+    end
+    local function indent()
+        indentation = indentation + 1
+    end
+    local function unindent()
+        indentation = indentation - 1
+    end
+
+    add("return function(wordCache)")
+    indent()
+    add("local entry = {}")
+    add("entry.name = wordCache[1] -- hardcoded since these are always the first two entries")
+    add("entry.type = wordCache[2]")
+    add("entry.data = {}")
+    add("")
+
+    local groups = {}
+    for i = 3, #format do
+        local f = format[i]
+        if not groups[f.group - 2] then
+            groups[f.group - 2] = {}
+        end
+
+        table.insert(groups[f.group - 2], { index = i, name = f.name, type = f.type, when = f.when })
+    end
+
+    for groupIdx, group in ipairs(groups) do
+        add("entry.data[" .. groupIdx .. "] = {")
+        indent()
+        -- add(string.format("name = \"%s\",", group[1].name))
+        -- add(string.format("type = \"%s\",", group[1].type))
+        for _, item in ipairs(group) do
+            local entryName = item.when == "start" and "start" or
+                (item.when == "end" and "stop" or error("Invalid 'when' value: " .. tostring(item.when)))
+            add(string.format("%s = tonumber(wordCache[%d]),", entryName, item.index))
+        end
+        unindent()
+        add("}")
+    end
+
+    Groups = {}
+
+    for groupIdx, group in ipairs(groups) do
+        table.insert(Groups, { name = group[1].name, type = group[1].type })
+    end
+
+    add("return entry")
+    unindent()
+    add("end")
+
+    assert(indentation == 0, "Indentation is not zero")
+
+    print(str)
+
+    return assert(assert(loadstring(str))())
+end
+
+local colors = {
+    { 0.9, 0.5, 0.1 },
+    { 0.1, 0.9, 0.5 },
+    { 0.5, 0.1, 0.9 },
+    { 0.9, 0.1, 0.5 },
+    { 0.5, 0.9, 0.1 },
+    { 0.1, 0.5, 0.9 },
+}
+
 local file = love.filesystem.openFile(path, "r")
 local filestring = file:read()
 
 Events = {}
+Format = {}
+local groupIndex = 1
 
 local line = 0
 for str in lines(filestring) do
@@ -47,31 +157,29 @@ for str in lines(filestring) do
     getWords(str)
 
     if line == 1 then
-        header = {}
-
         for i, word in ipairs(wordCache) do
-            header[word] = i
+            local name, type, when = unpack(split(word, ":"))
+            Format[i] = { name = name, type = type, when = when, group = groupIndex }
+            if when == "end" or type == "name" or type == "type" then
+                groupIndex = groupIndex + 1
+            end
         end
+
+        Format.components = #wordCache
+        Format.createEntry = generateCreateEntryFunction(Format)
     else
-        local name, start, stop, garbageStart, garbageEnd, type = unpack(wordCache, 1, 6)
-        start, stop                                             = tonumber(start), tonumber(stop)
-        garbageStart, garbageEnd                                = tonumber(garbageStart), tonumber(garbageEnd)
-
-        local garbage                                           = garbageEnd - garbageStart
-        local duration                                          = stop - start
-
-        local event                                             = table.new(0, 8)
-        event.duration                                          = duration
-        event.start                                             = start
-        event.stop                                              = stop
-        event.name                                              = name
-        event.garbageStart                                      = garbageStart
-        event.garbageEnd                                        = garbageEnd
-        event.garbage                                           = garbage
-        event.type                                              = type
-
-        table.insert(Events, event)
+        local entry = Format.createEntry(wordCache)
+        table.insert(Events, entry)
     end
 end
 
 love.filesystem.unmountFullPath(profileDir)
+
+GroupNameToIndex = {}
+
+for i, group in ipairs(Groups) do
+    group.color = colors[((i - 1) % #colors) + 1]
+    group.color = ffi.new("float[4]", group.color[1], group.color[2], group.color[3], 1)
+
+    GroupNameToIndex[group.name] = i
+end

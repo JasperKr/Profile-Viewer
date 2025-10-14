@@ -42,8 +42,6 @@ local function pointAABB(x, y, minX, minY, maxX, maxY)
 end
 
 local selectionEventInfoByName = {}
-local selectedSortedEventTimes = {}
-local selectedSortedEventGarbages = {}
 local selectionTotalEventCount = 0
 local eventInfoCache = {}
 
@@ -69,19 +67,20 @@ local function updateSelectionStatistics()
         if event.type == "push" then
             if eventInfo == nil then
                 selectionEventInfoByName[name] = {
-                    duration = 0,
                     count = 0,
-                    garbage = 0,
                 }
+
+                for groupIdx, group in ipairs(Groups) do
+                    selectionEventInfoByName[name][group.name] = 0
+                end
 
                 eventInfo = selectionEventInfoByName[name]
             end
 
-            eventInfo.duration =
-                eventInfo.duration + event.duration
-
-            eventInfo.garbage =
-                eventInfo.garbage + event.garbage
+            for groupIdx, group in ipairs(event.data) do
+                local groupDescription = Groups[groupIdx]
+                eventInfo[groupDescription.name] = eventInfo[groupDescription.name] + group.stop - group.start
+            end
 
             eventInfo.count =
                 eventInfo.count + 1
@@ -90,30 +89,31 @@ local function updateSelectionStatistics()
         end
     end
 
-    for i, info in ipairs(selectedSortedEventTimes) do table.insert(eventInfoCache, info) end
-    for i, info in ipairs(selectedSortedEventGarbages) do table.insert(eventInfoCache, info) end
 
-    table.clear(selectedSortedEventTimes)
-    table.clear(selectedSortedEventGarbages)
-
-    for name, total in pairs(selectionEventInfoByName) do
-        local info0 = table.remove(eventInfoCache) or {}
-        info0.name = name
-        info0.total = total.duration
-        info0.count = total.count
-
-        local info1 = table.remove(eventInfoCache) or {}
-        info1.name = name
-        info1.total = total.garbage
-        info1.count = total.count
-
-        table.insert(selectedSortedEventTimes, info0)
-        table.insert(selectedSortedEventGarbages, info1)
+    for i, toSort in pairs(Sorted) do
+        for j, info in ipairs(toSort) do table.insert(eventInfoCache, info) end
+        table.clear(toSort)
     end
 
-    table.sort(selectedSortedEventTimes, function(a, b) return a.total > b.total end)
-    table.sort(selectedSortedEventGarbages, function(a, b) return a.total > b.total end)
+    for name, total in pairs(selectionEventInfoByName) do
+        for groupIdx, group in ipairs(Groups) do
+            local info = table.remove(eventInfoCache) or {}
+            info.name = name
+            info.total = total[group.name]
+            info.count = total.count
+
+            table.insert(Sorted[group.name], info)
+        end
+    end
+
+    for i, toSort in pairs(Sorted) do
+        table.sort(toSort, function(a, b) return a.total > b.total end)
+    end
 end
+
+local previousStart = -1
+local previousEnd = -1
+updateSelectionStatistics()
 
 local function handleDrag(frameXStart, frameXEnd, frameCount, floor)
     local mx, my = love.mouse.getPosition()
@@ -126,49 +126,55 @@ local function handleDrag(frameXStart, frameXEnd, frameCount, floor)
     local windowMaxX = windowPos.x + windowSize.x
     local windowMaxY = windowPos.y + windowSize.y
 
-    if pointAABB(mx, my, windowMinX, windowMinY, windowMaxX, windowMaxY)
-        and Imgui.IsMouseDragging(Imgui.ImGuiMouseButton_Left) then
-        local dragDelta = Imgui.GetMouseDragDelta(Imgui.ImGuiMouseButton_Left, 0.0)
+    local inAABB = pointAABB(mx, my, windowMinX, windowMinY, windowMaxX, windowMaxY)
 
-        local aX = mx - dragDelta.x
-        local aY = my - dragDelta.y
+    if inAABB then
+        if Imgui.IsMouseDragging(Imgui.ImGuiMouseButton_Left) then
+            local dragDelta = Imgui.GetMouseDragDelta(Imgui.ImGuiMouseButton_Left, 0.0)
 
-        local bX = mx
-        local bY = my
+            local aX = mx - dragDelta.x
+            local aY = my - dragDelta.y
 
-        local startX = math.min(aX, bX)
-        local startY = math.min(aY, bY)
+            local bX = mx
+            local bY = my
 
-        local endX = math.max(aX, bX)
-        local endY = math.max(aY, bY)
+            local startX = math.min(aX, bX)
+            local startY = math.min(aY, bY)
 
-        local startXLocal, startYLocal = inverseTransformPoint(startX, startY)
-        local endXLocal, endYLocal = inverseTransformPoint(endX, endY)
+            local endX = math.max(aX, bX)
+            local endY = math.max(aY, bY)
 
-        local range = frameXEnd - frameXStart
-        local offset = -frameXStart
+            local startXLocal, startYLocal = inverseTransformPoint(startX, startY)
+            local endXLocal, endYLocal = inverseTransformPoint(endX, endY)
 
-        local frameStart, frameEnd
+            local range = frameXEnd - frameXStart
+            local offset = -frameXStart
 
-        if floor then
-            frameStart = math.floor((startXLocal + offset) / range * frameCount)
-            frameEnd = math.floor((endXLocal + offset) / range * frameCount)
-        else
-            frameStart = math.floor((startXLocal + offset) / range * frameCount + 0.5)
-            frameEnd = math.floor((endXLocal + offset) / range * frameCount + 0.5)
-        end
+            local frameStart, frameEnd
 
-        local previousStart = selectedFrameRange[1]
-        local previousEnd = selectedFrameRange[2]
+            if floor then
+                frameStart = math.floor((startXLocal + offset) / range * frameCount)
+                frameEnd = math.floor((endXLocal + offset) / range * frameCount)
+            else
+                frameStart = math.floor((startXLocal + offset) / range * frameCount + 0.5)
+                frameEnd = math.floor((endXLocal + offset) / range * frameCount + 0.5)
+            end
 
-        selectedFrameRange[1] = clamp(frameStart, 0, frameCount - 1)
-        selectedFrameRange[2] = clamp(frameEnd, 0, frameCount - 1)
-
-        if previousStart ~= selectedFrameRange[1]
-            or previousEnd ~= selectedFrameRange[2] then
-            updateSelectionStatistics()
+            selectedFrameRange[1] = clamp(frameStart, 0, frameCount - 1)
+            selectedFrameRange[2] = clamp(frameEnd, 0, frameCount - 1)
+        elseif love.mouse.isDown(1) then
+            selectedFrameRange[1] = -1
+            selectedFrameRange[2] = -1
         end
     end
+
+    if previousStart ~= selectedFrameRange[1]
+        or previousEnd ~= selectedFrameRange[2] then
+        updateSelectionStatistics()
+    end
+
+    previousStart = selectedFrameRange[1]
+    previousEnd = selectedFrameRange[2]
 end
 
 local viewingFrame = 0
@@ -185,7 +191,7 @@ local frameListCanvas
 local frameGraphCanvas
 local frameTimelineCanvas
 
-local function drawFrame(index, width, height)
+local function drawFrame(index, width, height, key)
     local time = love.timer.getTime()
     local frame = Frames[index]
 
@@ -194,17 +200,34 @@ local function drawFrame(index, width, height)
         return
     end
 
-    local frameStartTime = frame[1].start
-    local frameEndTime = frame[#frame].stop
-    local frameDuration = frameEndTime - frameStartTime
+    local groupIdxWithKey
 
-    local offset = -frameStartTime
-    local scale = width / frameDuration
+    for groupIdx, group in ipairs(Groups) do
+        if group.name == key then
+            groupIdxWithKey = groupIdx
+            break
+        end
+    end
+
+    assert(groupIdxWithKey, "No group with name '" .. tostring(key) .. "' found")
+
+    local frameStartValue = frame[1].data[groupIdxWithKey].start
+    local frameEndValue = frame[#frame].data[groupIdxWithKey].stop
+
+    local frameDifference = frameEndValue - frameStartValue
+
+    frameDifference = math.abs(frameDifference)
+
+    local offset = -frameStartValue
+    local scale = width / frameDifference
     local depth = 0
     local maxDepthReached = 0
     local itemHeight = 22
 
     local mx, my = love.mouse.getPosition()
+
+    width = math.max(width, 64)
+    height = math.max(height, 64)
 
     if not frameTimelineCanvas
         or frameTimelineCanvas:getWidth() ~= width
@@ -215,10 +238,24 @@ local function drawFrame(index, width, height)
     love.graphics.setCanvas(frameTimelineCanvas)
     love.graphics.clear(0, 0, 0, 0)
 
+    if frameDifference == 0 then
+        love.graphics.setColor(1, 1, 1, 0.9)
+        love.graphics.print("No difference in key '" .. key .. "' for this frame", 2, 2)
+        love.graphics.setCanvas()
+        return
+    end
+
     for i, event in ipairs(frame) do
-        local x = (event.start + offset) * scale
+        local eventData = event.data[groupIdxWithKey]
+        local groupDescription = Groups[groupIdxWithKey]
+
+        local x = math.abs(eventData.start + offset) * scale
         local y = depth * (itemHeight + 4)
-        local w = event.duration * scale
+        local w = math.abs(eventData.stop - eventData.start) * scale
+
+        x = math.floor(x + 0.5)
+        y = math.floor(y + 0.5)
+        w = math.floor(w + 0.5)
 
         if event.type == "push" then
             depth = depth + 1
@@ -240,16 +277,30 @@ local function drawFrame(index, width, height)
         love.graphics.setScissor(x, y, w, itemHeight)
 
         love.graphics.setColor(1, 1, 1)
-        love.graphics.print(event.name .. " " .. Stringh.formatTime(event.duration), x + 2, y + 2)
+
+        if groupDescription.type == "time" then
+            love.graphics.print(event.name .. " " .. Stringh.formatTime(eventData.stop - eventData.start), x + 2, y + 2)
+        elseif groupDescription.type == "byte" then
+            love.graphics.print(event.name .. " " .. Stringh.formatBytes(eventData.stop - eventData.start, false), x + 2,
+                y + 2)
+        else
+            error("Unknown event data type: " .. tostring(groupDescription.type))
+        end
 
         love.graphics.setScissor()
 
         if pointAABB(mx, my, screenMinX, screenMinY, screenMaxX, screenMaxY) then
-            tooltipItem = event.name .. "\n" ..
-                "Duration: " .. Stringh.formatTime(event.duration) .. "\n" ..
-                "Start: " .. Stringh.formatTime(event.start) .. "\n" ..
-                "Stop: " .. Stringh.formatTime(event.stop) .. "\n" ..
-                "Garbage: " .. (event.garbage > 0 and (Stringh.formatBytes(event.garbage * 1024, false)) or "N/A")
+            tooltipItem = event.name .. "\n"
+
+            for groupIdx, group in ipairs(event.data) do
+                if groupDescription.type == "time" then
+                    tooltipItem = tooltipItem .. string.format("%s: %s\n", groupDescription.name,
+                        "Delta:" .. Stringh.formatTime(group.stop - group.start))
+                elseif groupDescription.type == "byte" then
+                    tooltipItem = tooltipItem .. string.format("%s: %s\n", groupDescription.name,
+                        "Delta:" .. Stringh.formatBytes(group.stop - group.start, false))
+                end
+            end
         end
 
         ::continue::
@@ -262,6 +313,20 @@ local function drawFrame(index, width, height)
     return maxDepthReached * (itemHeight + 4)
 end
 
+local function drawGroupInfo()
+    if Imgui.Begin("Groups") then
+        Imgui.Text("Groups:")
+
+        for groupIdx, group in ipairs(Groups) do
+            Imgui.Text(string.format("%d. %s (%s)", groupIdx, group.name, group.type))
+            Imgui.SameLine()
+            Imgui.ColorEdit4("Color##" .. groupIdx, group.color,
+                Imgui.ImGuiColorEditFlags_NoInputs + Imgui.ImGuiColorEditFlags_NoLabel)
+        end
+    end
+    Imgui.End()
+end
+
 local frameInfoCache = {}
 
 local function getFrameInfo(frame)
@@ -272,33 +337,25 @@ local function getFrameInfo(frame)
     local firstEvent = frame[1]
     local lastEvent = frame[#frame]
     if firstEvent and lastEvent then
-        local duration = lastEvent.stop - firstEvent.start
+        local groupInfo = {}
+        for groupIdx, group in ipairs(Groups) do
+            local start = firstEvent.data[groupIdx].start
+            local stop = lastEvent.data[groupIdx].stop
+            local difference = stop - start
+            local min = math.min(start, stop)
+            local max = math.max(start, stop)
 
-        local minGarbage = math.huge
-        local maxGarbage = 0
-        local invalidGarbage = false
-
-        if firstEvent.garbageStart > 0 and firstEvent.garbageEnd > 0 then
-            minGarbage = math.min(minGarbage, firstEvent.garbageStart, firstEvent.garbageEnd)
-            maxGarbage = math.max(maxGarbage, firstEvent.garbageStart, firstEvent.garbageEnd)
-        else
-            invalidGarbage = true
-        end
-
-        if lastEvent.garbageStart > 0 and lastEvent.garbageEnd > 0 then
-            minGarbage = math.min(minGarbage, lastEvent.garbageStart, lastEvent.garbageEnd)
-            maxGarbage = math.max(maxGarbage, lastEvent.garbageStart, lastEvent.garbageEnd)
-        else
-            invalidGarbage = true
+            groupInfo[group.name] = {
+                difference = difference,
+                min = min,
+                max = max,
+                valid = min ~= -math.huge
+            }
         end
 
         local info = {
             eventCount = #frame,
-            duration = duration,
-            garbageAtEnd = lastEvent.garbageEnd,
-            minGarbage = minGarbage,
-            maxGarbage = maxGarbage,
-            validGarbage = not invalidGarbage,
+            groupInfo = groupInfo,
         }
 
         frameInfoCache[frame] = info
@@ -319,8 +376,6 @@ local function drawFrameList(width, height)
     love.graphics.setCanvas(frameListCanvas)
     love.graphics.clear(0, 0, 0, 0)
 
-    local minGarbage = math.huge
-    local maxGarbage = -math.huge
     local mx, my = love.mouse.getPosition()
 
     for i = 0, #Frames - 1, FrameIterationStep do
@@ -344,20 +399,24 @@ local function drawFrameList(width, height)
 
         local info = assert(getFrameInfo(Frames[i]))
 
-        local duration = info.duration
-
-        if info.validGarbage then
-            minGarbage = math.min(minGarbage, info.minGarbage)
-            maxGarbage = math.max(maxGarbage, info.maxGarbage)
-        end
-
         if hovered then
             if love.mouse.isDown(1) then
                 viewingFrame = i
             end
-            tooltipItem = "Frame " .. i .. " (" .. #Frames[i] .. " events)\n" ..
-                "Duration: " .. Stringh.formatTime(info.duration) .. "\n" ..
-                "Garbage: " .. Stringh.formatBytes(info.garbageAtEnd * 1024, false)
+            tooltipItem = "Frame " .. i .. " (" .. #Frames[i] .. " events)\n"
+
+            for groupIdx, group in ipairs(Groups) do
+                local gInfo = info.groupInfo[group.name]
+                if gInfo and gInfo.valid then
+                    if gInfo.type == "time" then
+                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
+                            "Delta:" .. Stringh.formatTime(gInfo.difference))
+                    elseif gInfo.type == "byte" then
+                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
+                            "Delta:" .. Stringh.formatBytes(gInfo.difference, false))
+                    end
+                end
+            end
         end
     end
 
@@ -371,14 +430,26 @@ local function drawFrameList(width, height)
     end
 
     love.graphics.setCanvas()
-
-    return minGarbage, maxGarbage
 end
 
-local function drawFrameGraph(minGarbage, maxGarbage, width, height)
+local last = {}
+local viewRanges = {}
+
+for groupIdx, group in ipairs(Groups) do
+    last[group.name] = 0
+
+    local low, high = Percentiles[group.name].low, Percentiles[group.name].high
+
+    viewRanges[group.name] = { min = low, max = high, offset = -low, scale = 1 / (high - low) }
+end
+
+local function drawFrameGraph(width, height)
     local time = love.timer.getTime()
 
     local itemWidth = (width / #Frames)
+
+    width = math.max(width, 64)
+    height = math.max(height, 64)
 
     if not frameGraphCanvas
         or frameGraphCanvas:getWidth() ~= width
@@ -389,14 +460,9 @@ local function drawFrameGraph(minGarbage, maxGarbage, width, height)
     love.graphics.setCanvas(frameGraphCanvas)
     love.graphics.clear(0, 0, 0, 0)
 
-    local garbageOffset = -minGarbage
-    local garbageScale = height / (maxGarbage - minGarbage)
-
-    local timeOffset = -GraphTimeMin
-    local timeScale = height / (GraphTimeMax - GraphTimeMin)
-
-    local lastGarbage = -1
-    local lastTime = -1
+    for groupIdx, group in ipairs(Groups) do
+        last[group.name] = 0
+    end
 
     frametimeInfo.drawFrameList = love.timer.getTime() - time
     time = love.timer.getTime()
@@ -406,37 +472,19 @@ local function drawFrameGraph(minGarbage, maxGarbage, width, height)
 
         local firstEvent = Frames[i][1]
         local lastEvent = Frames[i][#Frames[i]]
-        local garbage = lastEvent.garbageEnd
 
-        local startTime = firstEvent.start
-        local stopTime = lastEvent.stop
-        local duration = stopTime - startTime
+        for groupIdx, group in ipairs(Groups) do
+            local value = lastEvent.data[groupIdx].stop - firstEvent.data[groupIdx].start
 
-        if garbage <= 0 or lastGarbage <= 0 then
-            goto continue
+            local range = viewRanges[group.name]
+            local y = (value + range.offset) * range.scale * height
+            local y2 = (last[group.name] + range.offset) * range.scale * height
+
+            love.graphics.setColor(group.color[0], group.color[1], group.color[2], 0.8)
+            love.graphics.line(x, height - y, x - itemWidth * FrameIterationStep, height - y2)
+
+            last[group.name] = value
         end
-
-        do
-            local y = (garbage + garbageOffset) * garbageScale
-            local x2 = x - itemWidth * FrameIterationStep
-            local y2 = (lastGarbage + garbageOffset) * garbageScale
-
-            love.graphics.setColor(0.2, 0.6, 0.9, 0.6)
-            love.graphics.line(x, height - y, x2, height - y2)
-
-            love.graphics.setColor(0.9, 0.6, 0.1, 0.6)
-
-            y = (clamp(duration, GraphTimeMin, GraphTimeMax) + timeOffset) * timeScale
-            x2 = x - itemWidth * FrameIterationStep
-            y2 = (clamp(lastTime, GraphTimeMin, GraphTimeMax) + timeOffset) * timeScale
-
-            love.graphics.line(x, height - y, x2, height - y2)
-        end
-
-        ::continue::
-
-        lastGarbage = garbage
-        lastTime = duration
     end
 
     handleDrag(0, width, #Frames, false)
@@ -453,15 +501,21 @@ local function drawFrameGraph(minGarbage, maxGarbage, width, height)
 
     if frameAtCursor then
         local info = getFrameInfo(frameAtCursor)
-
         if pointAABB(mx, my, 0, 0, width, height) then
-            tooltipItem = string.format(
-                "Frame %d (%d events)\nDuration: %s\nGarbage: %s",
-                frameIndexAtCursor,
-                info.eventCount,
-                Stringh.formatTime(info.duration),
-                (info.validGarbage and (Stringh.formatBytes(info.garbageAtEnd, false)) or "N/A")
-            )
+            tooltipItem = "Frame " .. frameIndexAtCursor .. " (" .. info.eventCount .. " events)\n"
+
+            for groupIdx, group in ipairs(Groups) do
+                local gInfo = info.groupInfo[group.name]
+                if gInfo and gInfo.valid then
+                    if gInfo.type == "time" then
+                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
+                            "Delta:" .. Stringh.formatTime(gInfo.difference))
+                    elseif gInfo.type == "byte" then
+                        tooltipItem = tooltipItem .. string.format("%s: %s\n", group.name,
+                            "Delta:" .. Stringh.formatBytes(gInfo.difference, false))
+                    end
+                end
+            end
 
             if love.mouse.isDown(1) then
                 viewingFrame = frameIndexAtCursor
@@ -482,15 +536,37 @@ local function drawFrameGraph(minGarbage, maxGarbage, width, height)
     love.graphics.setCanvas()
 end
 
-local function drawEventTimingInfo()
+local sortByString = Groups[1] and Groups[1].name or error("No groups found")
+
+local function drawEventInfo()
     if selectedFrameRange[2] <= 0 then
         Imgui.Text("Total events: " .. #Events)
         Imgui.Text("Total frames: " .. #Frames)
-        Imgui.SeparatorText("Event times:")
 
-        for i, eventInfo in ipairs(SortedEventTimes) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
-                eventInfo.count))
+        if Imgui.BeginCombo("Sort by", sortByString) then
+            for groupIdx, group in ipairs(Groups) do
+                if Imgui.Selectable_Bool(group.name, sortByString == group.name) then
+                    sortByString = group.name
+                end
+            end
+
+            Imgui.EndCombo()
+        end
+
+        Imgui.SeparatorText("Events:")
+        local type = Groups[GroupNameToIndex[sortByString]].type
+        if type == "time" then
+            for i, eventInfo in ipairs(Sorted[sortByString]) do
+                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
+                    eventInfo.count))
+            end
+        elseif type == "byte" then
+            for i, eventInfo in ipairs(Sorted[sortByString]) do
+                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                    Stringh.formatBytes(eventInfo.total, false), eventInfo.count))
+            end
+        else
+            error("Unknown group type: " .. tostring(type))
         end
     else
         local from = selectedFrameRange[1]
@@ -500,29 +576,31 @@ local function drawEventTimingInfo()
 
         Imgui.Text(string.format("Selected frames: %d - %d (%d %s)", from, to, count, name))
         Imgui.Text(string.format("Total events in selection: %d", selectionTotalEventCount))
-        Imgui.SeparatorText("Event times in selection:")
-        for i, eventInfo in ipairs(selectedSortedEventTimes) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
-                eventInfo.count))
-        end
-    end
-end
 
-local function drawEventGarbageInfo()
-    if selectedFrameRange[2] <= 0 then
-        Imgui.SeparatorText("Event garbage:")
+        if Imgui.BeginCombo("Sort by", sortByString) then
+            for groupIdx, group in ipairs(Groups) do
+                if Imgui.Selectable_Bool(group.name, sortByString == group.name) then
+                    sortByString = group.name
+                end
+            end
 
-        for i, eventInfo in ipairs(SortedEventGarbages) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                Stringh.formatBytes(eventInfo.total * 1024, false),
-                eventInfo.count))
+            Imgui.EndCombo()
         end
-    else
-        Imgui.SeparatorText("Event garbage in selection:")
-        for i, eventInfo in ipairs(selectedSortedEventGarbages) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                Stringh.formatBytes(eventInfo.total * 1024, false),
-                eventInfo.count))
+
+        Imgui.SeparatorText("Events in selection:")
+        local type = Groups[GroupNameToIndex[sortByString]].type
+        if type == "time" then
+            for i, eventInfo in ipairs(Sorted[sortByString]) do
+                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
+                    eventInfo.count))
+            end
+        elseif type == "byte" then
+            for i, eventInfo in ipairs(Sorted[sortByString]) do
+                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                    Stringh.formatBytes(eventInfo.total, false), eventInfo.count))
+            end
+        else
+            error("Unknown group type: " .. tostring(type))
         end
     end
 end
@@ -538,7 +616,28 @@ local function drawTooltipItem()
         local width = font:getWidth(tooltipItem) + padding * 2
         local height = font:getHeight() * (countNewlines(tooltipItem) + 1) + padding * 2
 
-        love.graphics.setColor(0.9, 0.9, 0.9)
+        local screenWidth, screenHeight = love.graphics.getDimensions()
+
+        local rectMinX = mx + offsetX
+        local rectMinY = my + offsetY
+        local rectMaxX = rectMinX + width
+        local rectMaxY = rectMinY + height
+
+        if rectMaxX > screenWidth then
+            local diff = rectMaxX - screenWidth
+            offsetX = offsetX - diff
+            rectMinX = mx + offsetX
+            rectMaxX = rectMinX + width
+        end
+
+        if rectMaxY > screenHeight then
+            local diff = rectMaxY - screenHeight
+            offsetY = offsetY - diff
+            rectMinY = my + offsetY
+            rectMaxY = rectMinY + height
+        end
+
+        love.graphics.setColor(0.7, 0.7, 0.7)
         love.graphics.rectangle("fill", mx + offsetX, my + offsetY, width, height, 6, 6, 8)
 
         love.graphics.setColor(0.05, 0.05, 0.05, 1)
@@ -576,7 +675,22 @@ local flags = Imgui.love.WindowFlags("NoTitleBar", "NoMove", "NoResize",
     "NoCollapse", "NoSavedSettings", "NoFocusOnAppearing", "NoBringToFrontOnFocus", "NoScrollbar")
 
 local regionAvailable = Imgui.ImVec2_Float(0, 0)
-local minGarbage, maxGarbage
+local minGarbage, maxGarbage, minGrMemory, maxGrMemory = 0, 0, 0, 0
+
+local keyToGraph = Groups[1].name
+local best = 1
+local score = 0
+for groupIdx, group in ipairs(Groups) do
+    if group.name == "time" then
+        best = groupIdx
+        score = 2
+    elseif group.type == "time" and score < 1 then
+        best = groupIdx
+        score = 1
+    end
+end
+
+keyToGraph = Groups[best].name
 
 function love.draw()
     Imgui.love.Update(love.timer.getDelta())
@@ -598,7 +712,20 @@ function love.draw()
     if Imgui.Begin("Frame Timeline") then
         Imgui.GetContentRegionAvail(regionAvailable)
 
-        drawFrame(viewingFrame, regionAvailable.x, regionAvailable.y)
+        if Imgui.BeginCombo("Key to graph", keyToGraph) then
+            for groupIdx, group in ipairs(Groups) do
+                if Imgui.Selectable_Bool(group.name, keyToGraph == group.name) then
+                    keyToGraph = group.name
+                end
+            end
+
+            Imgui.EndCombo()
+        end
+
+        Imgui.Separator()
+
+        ---@diagnostic disable-next-line: undefined-field
+        drawFrame(viewingFrame, regionAvailable.x, regionAvailable.y, keyToGraph)
 
         Imgui.Image(frameTimelineCanvas, regionAvailable)
     end
@@ -613,7 +740,8 @@ function love.draw()
         if Imgui.BeginChild_Str("Frame list") then
             Imgui.GetContentRegionAvail(regionAvailable)
 
-            minGarbage, maxGarbage = drawFrameList(regionAvailable.x, regionAvailable.y)
+            ---@diagnostic disable-next-line: undefined-field
+            drawFrameList(regionAvailable.x, regionAvailable.y)
 
             Imgui.Image(frameListCanvas, regionAvailable)
         end
@@ -624,23 +752,21 @@ function love.draw()
     if Imgui.Begin("Frame Graph") then
         Imgui.GetContentRegionAvail(regionAvailable)
 
-        drawFrameGraph(minGarbage, maxGarbage, regionAvailable.x, regionAvailable.y)
+        ---@diagnostic disable-next-line: undefined-field
+        drawFrameGraph(regionAvailable.x, regionAvailable.y)
 
         Imgui.Image(frameGraphCanvas, regionAvailable)
     end
     Imgui.End()
 
-    if Imgui.Begin("Event Timing Summary") then
-        drawEventTimingInfo()
-    end
-    Imgui.End()
-
-    if Imgui.Begin("Event Garbage Summary") then
-        drawEventGarbageInfo()
+    if Imgui.Begin("Events Summary") then
+        drawEventInfo()
     end
     Imgui.End()
 
     love.graphics.setColor(1, 1, 1)
+
+    drawGroupInfo()
 
     Imgui.Render()
     Imgui.love.RenderDrawLists()
@@ -659,8 +785,6 @@ function love.resize()
 end
 
 function love.mousepressed(x, y, button)
-    selectedFrameRange[1] = -1
-    selectedFrameRange[2] = -1
     Imgui.love.MousePressed(button)
 end
 

@@ -22,46 +22,27 @@ for i, event in ipairs(Events) do
     table.insert(EventsByName[event.name], event)
 end
 
-TotalEventTimeByName = {}
-SortedEventGarbages = {}
+Sorted = {}
 
-for name, events in pairs(EventsByName) do
-    local total = 0
-    local garbageTotal = 0
-    local count = 0
-    for i, event in ipairs(events) do
-        if event.type == "push" then
-            total = total + event.duration
-            garbageTotal = garbageTotal + event.garbage
-            count = count + 1
-        end
-    end
-    TotalEventTimeByName[name] = {
-        duration = total,
-        count = count,
-        garbage = garbageTotal,
-    }
+for idx, group in ipairs(Groups) do
+    local groupName = group.name
+    Sorted[groupName] = {}
 end
 
-SortedEventTimes = {}
-SortedEventGarbages = {}
-
-for name, total in pairs(TotalEventTimeByName) do
-    table.insert(SortedEventTimes, { name = name, total = total.duration, count = total.count })
-    table.insert(SortedEventGarbages, { name = name, total = total.garbage, count = total.count })
-end
-
-table.sort(SortedEventTimes, function(a, b) return a.total > b.total end)
-table.sort(SortedEventGarbages, function(a, b) return a.total > b.total end)
-
-local durations = {}
+Differences = {}
 
 for i, frame in ipairs(Frames) do
     local firstEvent = frame[1]
     local lastEvent = frame[#frame]
     if firstEvent and lastEvent then
-        local duration = lastEvent.stop - firstEvent.start
-        table.insert(durations, duration)
+        for groupIdx, group in ipairs(Groups) do
+            if not Differences[group.name] then
+                Differences[group.name] = {}
+            end
+
+            local diff = lastEvent.data[groupIdx].stop - firstEvent.data[groupIdx].start
+            table.insert(Differences[group.name], diff)
+        end
     end
 end
 
@@ -73,5 +54,11 @@ local function percentile(items, p)
     return items[index]
 end
 
-GraphTimeMin = percentile(durations, 3)
-GraphTimeMax = percentile(durations, 97)
+Percentiles = {}
+
+for groupName, diffs in pairs(Differences) do
+    Percentiles[groupName] = {
+        low = percentile(diffs, 3),
+        high = percentile(diffs, 97),
+    }
+end

@@ -9,7 +9,14 @@ M = {
 require("cimgui.cdef")
 
 local ffi = require("ffi")
-M.C = ffi.load(love.filesystem.getSourceBaseDirectory() .. "/bin/cimgui.dll")
+
+local binary = "cimgui.dll"
+
+if love.system.getOS() == "Linux" then
+    binary = "cimgui.so"
+end
+
+M.C = ffi.load(love.filesystem.getSourceBaseDirectory() .. "/bin/" .. binary)
 
 require("cimgui.enums")
 require("cimgui.wrap")
