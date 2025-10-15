@@ -29,6 +29,8 @@ for idx, group in ipairs(Groups) do
     Sorted[groupName] = {}
 end
 
+Sorted["count"] = {}
+
 Differences = {}
 
 local lowest = math.huge

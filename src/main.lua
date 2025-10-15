@@ -48,8 +48,9 @@ local function formatFor(data, type)
 end
 
 local hiddenGroupColorScale = 0.2
-
 local selectedFrameRange = { -1, -1 }
+local selectedEvent = nil
+local highlightColor = { 0, 0.5, 0.8, 0.8 }
 
 local windowPos = Imgui.ImVec2_Nil()
 local windowSize = Imgui.ImVec2_Nil()
@@ -122,6 +123,16 @@ local function updateSelectionStatistics()
 
             table.insert(Sorted[group.name], info)
         end
+    end
+
+    for name, total in pairs(selectionEventInfoByName) do
+        local info = table.remove(eventInfoCache) or {}
+
+        info.name = name
+        info.total = total.count
+        info.count = total.count
+
+        table.insert(Sorted["count"], info)
     end
 
     for i, toSort in pairs(Sorted) do
@@ -284,6 +295,13 @@ local function drawFrame(index, width, height, key)
 
     depth = 0
 
+    local screenMinX, screenMinY = transformPoint(0, 0)
+    local screenMaxX, screenMaxY = transformPoint(0 + width, 0 + height)
+
+    if love.mouse.isDown(1) and pointAABB(mx, my, screenMinX, screenMinY, screenMaxX, screenMaxY) then
+        selectedEvent = nil
+    end
+
     for i, event in ipairs(frame) do
         local eventData = event.data[groupIdxWithKey]
         local groupDescription = Groups[groupIdxWithKey]
@@ -323,9 +341,15 @@ local function drawFrame(index, width, height, key)
         w = math.ceil(w + frac(x))
 
         love.graphics.setColor(0.5, 0.5, 0.5, 0.6)
-        love.graphics.rectangle("fill", x, y, w, itemHeight)
+        if selectedEvent and event.name == selectedEvent.name then
+            love.graphics.setColor(highlightColor)
+        end
+        love.graphics.rectangle("fill", x, y, w, itemHeight, 3, nil, 5)
         love.graphics.setColor(1, 1, 1, 0.5)
-        love.graphics.rectangle("line", x, y, w, itemHeight)
+        if selectedEvent and event.name == selectedEvent.name then
+            love.graphics.setColor(highlightColor)
+        end
+        love.graphics.rectangle("line", x, y, w, itemHeight, 3, nil, 5)
 
         local screenMinX, screenMinY = transformPoint(x, y)
         local screenMaxX, screenMaxY = transformPoint(x + w, y + itemHeight)
@@ -346,6 +370,10 @@ local function drawFrame(index, width, height, key)
                 local gInfo = Groups[groupIdx]
                 tooltipItem = tooltipItem .. string.format("%s: %s\n", gInfo.name,
                     "Delta:" .. formatFor(group.stop - group.start, gInfo.type))
+            end
+
+            if love.mouse.isDown(1) then
+                selectedEvent = event
             end
         end
 
@@ -606,23 +634,14 @@ local function drawEventInfo()
                     sortByString = group.name
                 end
             end
+            if Imgui.Selectable_Bool("Count", sortByString == "count") then
+                sortByString = "count"
+            end
 
             Imgui.EndCombo()
         end
 
         Imgui.SeparatorText("Events:")
-        local type = Groups[GroupNameToIndex[sortByString]].type
-        for i, eventInfo in ipairs(Sorted[sortByString]) do
-            if eventInfo.total ~= 0 then
-                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                    formatFor(eventInfo.total, type),
-                    eventInfo.count))
-            else
-                Imgui.TextDisabled(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                    formatFor(eventInfo.total, type),
-                    eventInfo.count))
-            end
-        end
     else
         local from = selectedFrameRange[1]
         local to = selectedFrameRange[2]
@@ -643,10 +662,38 @@ local function drawEventInfo()
         end
 
         Imgui.SeparatorText("Events in selection:")
+    end
+
+    if sortByString == "count" then
+        for i, eventInfo in ipairs(Sorted[sortByString]) do
+            if selectedEvent and eventInfo.name == selectedEvent.name then
+                Imgui.TextColored(
+                    Imgui.ImVec4_Float(highlightColor[1], highlightColor[2], highlightColor[3], highlightColor[4]),
+                    string.format("%d. %s - %d calls", i, eventInfo.name, eventInfo.count))
+            elseif eventInfo.count > 0 then
+                Imgui.Text(string.format("%d. %s - %d calls", i, eventInfo.name, eventInfo.count))
+            else
+                Imgui.TextDisabled(string.format("%d. %s - %d calls", i, eventInfo.name, eventInfo.count))
+            end
+        end
+    else
         local type = Groups[GroupNameToIndex[sortByString]].type
         for i, eventInfo in ipairs(Sorted[sortByString]) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, formatFor(eventInfo.total, type),
-                eventInfo.count))
+            if selectedEvent and eventInfo.name == selectedEvent.name then
+                Imgui.TextColored(
+                    Imgui.ImVec4_Float(highlightColor[1], highlightColor[2], highlightColor[3], highlightColor[4]),
+                    string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                        formatFor(eventInfo.total, type),
+                        eventInfo.count))
+            elseif eventInfo.total > 0.00001 then
+                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                    formatFor(eventInfo.total, type),
+                    eventInfo.count))
+            else
+                Imgui.TextDisabled(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                    formatFor(eventInfo.total, type),
+                    eventInfo.count))
+            end
         end
     end
 end
@@ -755,7 +802,7 @@ function love.draw()
 
     if Imgui.Begin("Frame List") then
         local frameIndexAsInt = ffi.new("int[1]", viewingFrame)
-        if Imgui.DragInt("Viewing Frame", frameIndexAsInt, 1) then
+        if Imgui.DragInt("Viewing Frame", frameIndexAsInt, 1, 0, #Frames - 1) then
             viewingFrame = clamp(frameIndexAsInt[0], 0, #Frames - 1)
         end
 
