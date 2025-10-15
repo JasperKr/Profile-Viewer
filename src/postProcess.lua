@@ -80,8 +80,6 @@ for groupName, diffs in pairs(Differences) do
         high = percentile(Differences[groupName], 100 - p),
     }
 
-    print(Percentiles[groupName].low, Percentiles[groupName].high)
-
     if lowest == highest then
         Percentiles[groupName].low = lowest * 0.9
         Percentiles[groupName].high = highest * 1.1
@@ -95,8 +93,6 @@ for groupName, diffs in pairs(Differences) do
 
         Percentiles[groupName].low = percentile(Differences[groupName], p)
         Percentiles[groupName].high = percentile(Differences[groupName], 100 - p)
-
-        print("Adjusted percentiles to:", Percentiles[groupName].low, Percentiles[groupName].high)
     end
 
     if Percentiles[groupName].low > 0 then

@@ -33,6 +33,22 @@ local function countNewlines(str)
     return count
 end
 
+--- Format data for display based on type
+---@param data number | integer
+---@param type "time" | "byte" | "duration"
+---@return string
+local function formatFor(data, type)
+    if type == "time" or type == "duration" then
+        return Stringh.formatTime(data)
+    elseif type == "byte" then
+        return Stringh.formatBytes(data, false)
+    else
+        error("Unknown group type: " .. tostring(type))
+    end
+end
+
+local hiddenGroupColorScale = 0.2
+
 local selectedFrameRange = { -1, -1 }
 
 local windowPos = Imgui.ImVec2_Nil()
@@ -192,6 +208,12 @@ local frametimeInfo = {
 local frameListCanvas
 local frameGraphCanvas
 local frameTimelineCanvas
+local eventCounts = {}
+local depthIndices = {}
+
+local function frac(x)
+    return x - math.floor(x)
+end
 
 local function drawFrame(index, width, height, key)
     local time = love.timer.getTime()
@@ -219,6 +241,7 @@ local function drawFrame(index, width, height, key)
     local frameDifference = frameEndValue - frameStartValue
 
     frameDifference = math.abs(frameDifference)
+    local noDifference = frameDifference == 0
 
     local offset = -frameStartValue
     local scale = width / frameDifference
@@ -240,33 +263,64 @@ local function drawFrame(index, width, height, key)
     love.graphics.setCanvas(frameTimelineCanvas)
     love.graphics.clear(0, 0, 0, 0)
 
-    if frameDifference == 0 then
-        love.graphics.setColor(1, 1, 1, 0.9)
-        love.graphics.print("No difference in key '" .. key .. "' for this frame", 2, 2)
-        love.graphics.setCanvas()
-        return
+    for i = 1, 64 do
+        depthIndices[i] = 0
     end
+
+    local stack = {}
+
+    for i, event in ipairs(frame) do
+        if event.type == "push" then
+            event.childCount = 0
+            if #stack > 0 then
+                stack[#stack].childCount = stack[#stack].childCount + 1
+                event.parent = stack[#stack]
+            end
+            table.insert(stack, event)
+        else
+            table.remove(stack)
+        end
+    end
+
+    depth = 0
 
     for i, event in ipairs(frame) do
         local eventData = event.data[groupIdxWithKey]
         local groupDescription = Groups[groupIdxWithKey]
 
-        local x = math.abs(eventData.start + offset) * scale
-        local y = depth * (itemHeight + 4)
-        local w = math.abs(eventData.stop - eventData.start) * scale
-
-        x = math.floor(x + 0.5)
-        y = math.floor(y + 0.5)
-        w = math.floor(w + 0.5)
-
         if event.type == "push" then
             depth = depth + 1
             maxDepthReached = math.max(maxDepthReached, depth)
+            depthIndices[depth] = depthIndices[depth] + 1
         else
+            depthIndices[depth + 1] = 0 -- reset for next use
             depth = math.max(0, depth - 1)
 
             goto continue
         end
+
+        local x, w
+
+        if noDifference then
+            local widthAvailable = event.parent and event.parent.width or width
+            local eventOffset = event.parent and event.parent.x or 0
+
+            x = eventOffset + (depthIndices[depth] - 1) / (event.parent and event.parent.childCount or 1) *
+                widthAvailable
+            w = widthAvailable / (event.parent and event.parent.childCount or 1)
+
+            event.width = w
+            event.x = x
+        else
+            x = math.abs(eventData.start + offset) * scale
+            w = math.abs(eventData.stop - eventData.start) * scale
+        end
+
+        local y = (depth - 1) * (itemHeight + 4)
+
+        x = math.floor(x)
+        y = math.floor(y)
+        w = math.ceil(w + frac(x))
 
         love.graphics.setColor(0.5, 0.5, 0.5, 0.6)
         love.graphics.rectangle("fill", x, y, w, itemHeight)
@@ -280,14 +334,8 @@ local function drawFrame(index, width, height, key)
 
         love.graphics.setColor(1, 1, 1)
 
-        if groupDescription.type == "time" then
-            love.graphics.print(event.name .. " " .. Stringh.formatTime(eventData.stop - eventData.start), x + 2, y + 2)
-        elseif groupDescription.type == "byte" then
-            love.graphics.print(event.name .. " " .. Stringh.formatBytes(eventData.stop - eventData.start, false), x + 2,
-                y + 2)
-        else
-            error("Unknown event data type: " .. tostring(groupDescription.type))
-        end
+        love.graphics.print(event.name .. " " .. formatFor(eventData.stop - eventData.start, groupDescription.type),
+            x + 2, y + 2)
 
         love.graphics.setScissor()
 
@@ -295,13 +343,9 @@ local function drawFrame(index, width, height, key)
             tooltipItem = event.name .. "\n"
 
             for groupIdx, group in ipairs(event.data) do
-                if groupDescription.type == "time" then
-                    tooltipItem = tooltipItem .. string.format("%s: %s\n", groupDescription.name,
-                        "Delta:" .. Stringh.formatTime(group.stop - group.start))
-                elseif groupDescription.type == "byte" then
-                    tooltipItem = tooltipItem .. string.format("%s: %s\n", groupDescription.name,
-                        "Delta:" .. Stringh.formatBytes(group.stop - group.start, false))
-                end
+                local gInfo = Groups[groupIdx]
+                tooltipItem = tooltipItem .. string.format("%s: %s\n", gInfo.name,
+                    "Delta:" .. formatFor(group.stop - group.start, gInfo.type))
             end
         end
 
@@ -315,15 +359,32 @@ local function drawFrame(index, width, height, key)
     return maxDepthReached * (itemHeight + 4)
 end
 
+local strings = {}
+
 local function drawGroupInfo()
     if Imgui.Begin("Groups") then
         Imgui.Text("Groups:")
+        table.clear(strings)
+        local longestStringLength = 0
 
         for groupIdx, group in ipairs(Groups) do
-            Imgui.Text(string.format("%d. %s (%s)", groupIdx, group.name, group.type))
+            local str = string.format("%d. %s (%s)", groupIdx, group.name, group.type)
+            table.insert(strings, str)
+            longestStringLength = math.max(longestStringLength, #str)
+        end
+
+        for groupIdx, group in ipairs(Groups) do
+            Imgui.Text(strings[groupIdx] .. string.rep(".", longestStringLength - #strings[groupIdx]))
             Imgui.SameLine()
             Imgui.ColorEdit4("Color##" .. groupIdx, group.color,
                 Imgui.ImGuiColorEditFlags_NoInputs + Imgui.ImGuiColorEditFlags_NoLabel)
+            Imgui.SameLine()
+            Imgui.Checkbox("##Hide" .. groupIdx, group.hidden)
+
+            group.workingColor[1] = group.color[0]
+            group.workingColor[2] = group.color[1]
+            group.workingColor[3] = group.color[2]
+            group.workingColor[4] = group.color[3]
         end
     end
     Imgui.End()
@@ -409,17 +470,9 @@ local function drawFrameList(width, height)
 
             for groupIdx, group in ipairs(Groups) do
                 local gInfo = info.groupInfo[group.name]
-                if group.type == "time" then
-                    tooltipItem = tooltipItem .. string.format("%s: %s; %s\n", group.name,
-                        Stringh.formatBytes(Frames[i][#Frames[i]].data[groupIdx].stop, false),
-                        "Delta:" .. (gInfo.valid and Stringh.formatTime(gInfo.difference) or "N/A"))
-                elseif group.type == "byte" then
-                    tooltipItem = tooltipItem .. string.format("%s: %s; %s\n", group.name,
-                        Stringh.formatBytes(Frames[i][#Frames[i]].data[groupIdx].stop, false),
-                        "Delta:" .. (gInfo.valid and Stringh.formatBytes(gInfo.difference, false) or "N/A"))
-                else
-                    error("Unknown group type: " .. tostring(group.type))
-                end
+                tooltipItem = tooltipItem .. string.format("%s: %s; %s\n", group.name,
+                    formatFor(Frames[i][#Frames[i]].data[groupIdx].stop, group.type),
+                    "Delta:" .. (gInfo.valid and formatFor(gInfo.difference, group.type) or "N/A"))
             end
         end
     end
@@ -488,7 +541,8 @@ local function drawFrameGraph(width, height)
             local y = (value + range.offset) * range.scale * height
             local y2 = (last[group.name] + range.offset) * range.scale * height
 
-            love.graphics.setColor(group.color[0], group.color[1], group.color[2], 0.8)
+            love.graphics.setColor(group.workingColor[1], group.workingColor[2], group.workingColor[3],
+                group.workingColor[4] * (group.hidden[0] and hiddenGroupColorScale or 1))
             love.graphics.line(x, height - y, x - itemWidth * FrameIterationStep, height - y2)
 
             last[group.name] = value
@@ -514,19 +568,10 @@ local function drawFrameGraph(width, height)
 
             for groupIdx, group in ipairs(Groups) do
                 local gInfo = info.groupInfo[group.name]
-                if group.type == "time" then
-                    tooltipItem = tooltipItem ..
-                        string.format("%s: %s; %s\n", group.name,
-                            Stringh.formatBytes(frameAtCursor[#frameAtCursor].data[groupIdx].stop, false),
-                            "Delta:" .. (gInfo.valid and Stringh.formatTime(gInfo.difference) or "N/A"))
-                elseif group.type == "byte" then
-                    tooltipItem = tooltipItem ..
-                        string.format("%s: %s; %s\n", group.name,
-                            Stringh.formatBytes(frameAtCursor[#frameAtCursor].data[groupIdx].stop, false),
-                            "Delta:" .. (gInfo.valid and Stringh.formatBytes(gInfo.difference, false) or "N/A"))
-                else
-                    error("Unknown group type: " .. tostring(group.type))
-                end
+                tooltipItem = tooltipItem ..
+                    string.format("%s: %s; %s\n", group.name,
+                        formatFor(frameAtCursor[#frameAtCursor].data[groupIdx].stop, group.type),
+                        "Delta:" .. (gInfo.valid and formatFor(gInfo.difference, group.type) or "N/A"))
             end
 
             if love.mouse.isDown(1) then
@@ -567,18 +612,16 @@ local function drawEventInfo()
 
         Imgui.SeparatorText("Events:")
         local type = Groups[GroupNameToIndex[sortByString]].type
-        if type == "time" then
-            for i, eventInfo in ipairs(Sorted[sortByString]) do
-                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
+        for i, eventInfo in ipairs(Sorted[sortByString]) do
+            if eventInfo.total ~= 0 then
+                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                    formatFor(eventInfo.total, type),
+                    eventInfo.count))
+            else
+                Imgui.TextDisabled(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
+                    formatFor(eventInfo.total, type),
                     eventInfo.count))
             end
-        elseif type == "byte" then
-            for i, eventInfo in ipairs(Sorted[sortByString]) do
-                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                    Stringh.formatBytes(eventInfo.total, false), eventInfo.count))
-            end
-        else
-            error("Unknown group type: " .. tostring(type))
         end
     else
         local from = selectedFrameRange[1]
@@ -601,18 +644,9 @@ local function drawEventInfo()
 
         Imgui.SeparatorText("Events in selection:")
         local type = Groups[GroupNameToIndex[sortByString]].type
-        if type == "time" then
-            for i, eventInfo in ipairs(Sorted[sortByString]) do
-                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
-                    eventInfo.count))
-            end
-        elseif type == "byte" then
-            for i, eventInfo in ipairs(Sorted[sortByString]) do
-                Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                    Stringh.formatBytes(eventInfo.total, false), eventInfo.count))
-            end
-        else
-            error("Unknown group type: " .. tostring(type))
+        for i, eventInfo in ipairs(Sorted[sortByString]) do
+            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, formatFor(eventInfo.total, type),
+                eventInfo.count))
         end
     end
 end
@@ -649,37 +683,14 @@ local function drawTooltipItem()
             rectMaxY = rectMinY + height
         end
 
+        rectMinX = math.floor(rectMinX + 0.5)
+        rectMinY = math.floor(rectMinY + 0.5)
+
         love.graphics.setColor(0.7, 0.7, 0.7)
-        love.graphics.rectangle("fill", mx + offsetX, my + offsetY, width, height, 6, 6, 8)
+        love.graphics.rectangle("fill", rectMinX, rectMinY, width, height, 6, 6, 8)
 
         love.graphics.setColor(0.05, 0.05, 0.05, 1)
-        love.graphics.print(tooltipItem, mx + offsetX + padding, my + offsetY + padding)
-    end
-end
-
-local function drawProfilerDebugInfo()
-    love.graphics.setColor(0.9, 0.9, 0.9)
-    do -- frametime info of the profiler itself
-        local w, h = love.graphics.getDimensions()
-        local height = 100
-        local width = 200
-
-        love.graphics.rectangle("fill", 5, h - 5 - height, width, height, 6, 6, 8)
-        love.graphics.setColor(0.05, 0.05, 0.05, 1)
-        love.graphics.print(
-            string.format(
-                "Profiler timings:\n" ..
-                " drawFrameGraph: %s\n" ..
-                " drawFrameList: %s\n" ..
-                " drawFrameInfo: %s\n" ..
-                " FPS: %.1f",
-                Stringh.formatTime(frametimeInfo.drawFrameGraph),
-                Stringh.formatTime(frametimeInfo.drawFrameList),
-                Stringh.formatTime(frametimeInfo.drawFrameInfo),
-                love.timer.getFPS()
-            ),
-            10, h - 5 - height + 10
-        )
+        love.graphics.print(tooltipItem, rectMinX + padding, rectMinY + padding)
     end
 end
 
@@ -687,7 +698,6 @@ local flags = Imgui.love.WindowFlags("NoTitleBar", "NoMove", "NoResize",
     "NoCollapse", "NoSavedSettings", "NoFocusOnAppearing", "NoBringToFrontOnFocus", "NoScrollbar")
 
 local regionAvailable = Imgui.ImVec2_Float(0, 0)
-local minGarbage, maxGarbage, minGrMemory, maxGrMemory = 0, 0, 0, 0
 
 local keyToGraph = Groups[1].name
 local best = 1
@@ -783,8 +793,8 @@ function love.draw()
     Imgui.Render()
     Imgui.love.RenderDrawLists()
 
+    -- drawProfilerDebugInfo()
     drawTooltipItem()
-    drawProfilerDebugInfo()
 end
 
 love.keyboard.setTextInput(true)

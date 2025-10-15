@@ -105,6 +105,8 @@ local function generateCreateEntryFunction(format)
     end
 
     for groupIdx, group in ipairs(groups) do
+        print("Found start - end pair for group: '" .. group[1].name .. "' of type: " .. group[1].type)
+
         add("entry.data[" .. groupIdx .. "] = {")
         indent()
         for _, item in ipairs(group) do
@@ -119,7 +121,7 @@ local function generateCreateEntryFunction(format)
     Groups = {}
 
     for groupIdx, group in ipairs(groups) do
-        table.insert(Groups, { name = group[1].name, type = group[1].type })
+        table.insert(Groups, { name = group[1].name, type = group[1].type, hidden = ffi.new("bool[1]", false) })
     end
 
     add("return entry")
@@ -128,18 +130,16 @@ local function generateCreateEntryFunction(format)
 
     assert(indentation == 0, "Indentation is not zero")
 
-    print(str)
-
     return assert(assert(loadstring(str))())
 end
 
 local colors = {
-    { 0.9, 0.5, 0.1 },
-    { 0.1, 0.9, 0.5 },
-    { 0.5, 0.1, 0.9 },
-    { 0.9, 0.1, 0.5 },
-    { 0.5, 0.9, 0.1 },
-    { 0.1, 0.5, 0.9 },
+    { 0.9, 0.5, 0.1, 0.8 },
+    { 0.1, 0.9, 0.5, 0.8 },
+    { 0.5, 0.1, 0.9, 0.8 },
+    { 0.9, 0.1, 0.5, 0.8 },
+    { 0.5, 0.9, 0.1, 0.8 },
+    { 0.1, 0.5, 0.9, 0.8 },
 }
 
 ---@diagnostic disable-next-line: undefined-field
@@ -159,6 +159,17 @@ for str in lines(filestring) do
     if line == 1 then
         for i, word in ipairs(wordCache) do
             local name, type, when = unpack(split(word, ":"))
+
+            assert(name and type, "Invalid header format at word '" .. tostring(word) .. "'")
+
+            if name ~= "name" and name ~= "type" then
+                assert(when, "When is nil for name '" .. name .. "'")
+            end
+
+            assert(type == "time" or type == "byte" or type == "name" or type == "type" or type == "duration",
+                "Type must be 'time', 'byte' or 'duration'")
+            assert(when == "start" or when == "end" or type == "name" or type == "type", "When must be 'start' or 'end'")
+
             Format[i] = { name = name, type = type, when = when, group = groupIndex }
             if when == "end" or type == "name" or type == "type" then
                 groupIndex = groupIndex + 1
@@ -181,6 +192,7 @@ GroupNameToIndex = {}
 for i, group in ipairs(Groups) do
     group.color = colors[((i - 1) % #colors) + 1]
     group.color = ffi.new("float[4]", group.color[1], group.color[2], group.color[3], 1)
+    group.workingColor = { group.color[0], group.color[1], group.color[2], group.color[3] }
 
     GroupNameToIndex[group.name] = i
 end
