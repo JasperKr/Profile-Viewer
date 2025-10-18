@@ -11,6 +11,14 @@ table.new = require("table.new")
 require("load")
 require("postProcess")
 
+local SummaryMode = false
+
+function love.load(args)
+    if args[1] == "-generate-summary-texture" then
+        SummaryMode = true
+    end
+end
+
 local screenPos = Imgui.ImVec2_Float(0, 0)
 local function transformPoint(x, y)
     Imgui.GetCursorScreenPos(screenPos)
@@ -623,25 +631,34 @@ end
 
 local sortByString = Groups[1] and Groups[1].name or error("No groups found")
 
-local function drawEventInfo()
+local function drawEventInfo(upTo)
     if selectedFrameRange[2] <= 0 then
         Imgui.Text("Total events: " .. #Events)
         Imgui.Text("Total frames: " .. #Frames)
 
-        if Imgui.BeginCombo("Sort by", sortByString) then
-            for groupIdx, group in ipairs(Groups) do
-                if Imgui.Selectable_Bool(group.name, sortByString == group.name) then
-                    sortByString = group.name
+        if not SummaryMode then
+            if Imgui.BeginCombo("Sort by", sortByString) then
+                for groupIdx, group in ipairs(Groups) do
+                    if Imgui.Selectable_Bool(group.name, sortByString == group.name) then
+                        sortByString = group.name
+                    end
                 end
-            end
-            if Imgui.Selectable_Bool("Count", sortByString == "count") then
-                sortByString = "count"
+                if Imgui.Selectable_Bool("Count", sortByString == "count") then
+                    sortByString = "count"
+                end
+
+                Imgui.EndCombo()
             end
 
-            Imgui.EndCombo()
+            Imgui.SeparatorText("Events:")
+        else -- Summary mode, give info about average frametime etc
+            Imgui.NewLine()
+
+            Imgui.Text("Average frame time: " ..
+                Stringh.formatTime(TotalFrameTime / #Frames))
+
+            Imgui.Separator()
         end
-
-        Imgui.SeparatorText("Events:")
     else
         local from = selectedFrameRange[1]
         local to = selectedFrameRange[2]
@@ -679,6 +696,10 @@ local function drawEventInfo()
     else
         local type = Groups[GroupNameToIndex[sortByString]].type
         for i, eventInfo in ipairs(Sorted[sortByString]) do
+            if i > upTo and upTo > 0 then
+                break
+            end
+
             if selectedEvent and eventInfo.name == selectedEvent.name then
                 Imgui.TextColored(
                     Imgui.ImVec4_Float(highlightColor[1], highlightColor[2], highlightColor[3], highlightColor[4]),
@@ -761,6 +782,7 @@ end
 
 keyToGraph = Groups[best].name
 
+local frameIdx = 0
 function love.draw()
     Imgui.love.Update(love.timer.getDelta())
     Imgui.NewFrame()
@@ -778,45 +800,47 @@ function love.draw()
     end
     Imgui.End()
 
-    if Imgui.Begin("Frame Timeline") then
-        Imgui.GetContentRegionAvail(regionAvailable)
-
-        if Imgui.BeginCombo("Key to graph", keyToGraph) then
-            for groupIdx, group in ipairs(Groups) do
-                if Imgui.Selectable_Bool(group.name, keyToGraph == group.name) then
-                    keyToGraph = group.name
-                end
-            end
-
-            Imgui.EndCombo()
-        end
-
-        Imgui.Separator()
-
-        ---@diagnostic disable-next-line: undefined-field
-        drawFrame(viewingFrame, regionAvailable.x, regionAvailable.y, keyToGraph)
-
-        Imgui.Image(frameTimelineCanvas, regionAvailable)
-    end
-    Imgui.End()
-
-    if Imgui.Begin("Frame List") then
-        local frameIndexAsInt = ffi.new("int[1]", viewingFrame)
-        if Imgui.DragInt("Viewing Frame", frameIndexAsInt, 1, 0, #Frames - 1) then
-            viewingFrame = clamp(frameIndexAsInt[0], 0, #Frames - 1)
-        end
-
-        if Imgui.BeginChild_Str("Frame list") then
+    if not SummaryMode then
+        if Imgui.Begin("Frame Timeline") then
             Imgui.GetContentRegionAvail(regionAvailable)
 
-            ---@diagnostic disable-next-line: undefined-field
-            drawFrameList(regionAvailable.x, regionAvailable.y)
+            if Imgui.BeginCombo("Key to graph", keyToGraph) then
+                for groupIdx, group in ipairs(Groups) do
+                    if Imgui.Selectable_Bool(group.name, keyToGraph == group.name) then
+                        keyToGraph = group.name
+                    end
+                end
 
-            Imgui.Image(frameListCanvas, regionAvailable)
+                Imgui.EndCombo()
+            end
+
+            Imgui.Separator()
+
+            ---@diagnostic disable-next-line: undefined-field
+            drawFrame(viewingFrame, regionAvailable.x, regionAvailable.y, keyToGraph)
+
+            Imgui.Image(frameTimelineCanvas, regionAvailable)
         end
-        Imgui.EndChild()
+        Imgui.End()
+
+        if Imgui.Begin("Frame List") then
+            local frameIndexAsInt = ffi.new("int[1]", viewingFrame)
+            if Imgui.DragInt("Viewing Frame", frameIndexAsInt, 1, 0, #Frames - 1) then
+                viewingFrame = clamp(frameIndexAsInt[0], 0, #Frames - 1)
+            end
+
+            if Imgui.BeginChild_Str("Frame list") then
+                Imgui.GetContentRegionAvail(regionAvailable)
+
+                ---@diagnostic disable-next-line: undefined-field
+                drawFrameList(regionAvailable.x, regionAvailable.y)
+
+                Imgui.Image(frameListCanvas, regionAvailable)
+            end
+            Imgui.EndChild()
+        end
+        Imgui.End()
     end
-    Imgui.End()
 
     if Imgui.Begin("Frame Graph") then
         Imgui.GetContentRegionAvail(regionAvailable)
@@ -829,19 +853,29 @@ function love.draw()
     Imgui.End()
 
     if Imgui.Begin("Events Summary") then
-        drawEventInfo()
+        drawEventInfo(SummaryMode and 20 or 0)
     end
     Imgui.End()
 
     love.graphics.setColor(1, 1, 1)
 
-    drawGroupInfo()
+    if not SummaryMode then
+        drawGroupInfo()
+    end
 
     Imgui.Render()
     Imgui.love.RenderDrawLists()
 
     -- drawProfilerDebugInfo()
-    drawTooltipItem()
+    if not SummaryMode then
+        drawTooltipItem()
+    end
+
+    frameIdx = frameIdx + 1
+    if SummaryMode and frameIdx == 2 then
+        love.graphics.captureScreenshot("graphics_screenshot.png")
+        love.event.quit()
+    end
 end
 
 love.keyboard.setTextInput(true)

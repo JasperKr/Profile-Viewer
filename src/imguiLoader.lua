@@ -13,4 +13,7 @@ require("imguiHelper")
 local io = Imgui.GetIO()
 io.ConfigFlags = bit.bor(io.ConfigFlags, Imgui.ImGuiConfigFlags_DockingEnable)
 
+local data, size = love.filesystem.read("string", "imgui.ini")
+M.LoadIniSettingsFromMemory(data, size)
+
 M = nil

@@ -35,6 +35,7 @@ Differences = {}
 
 local lowest = math.huge
 local highest = -math.huge
+TotalFrameTime = 0
 
 for i, frame in ipairs(Frames) do
     local firstEvent = frame[1]
@@ -49,6 +50,10 @@ for i, frame in ipairs(Frames) do
 
             if group.type == "time" then
                 diff = diff - firstEvent.data[groupIdx].start
+
+                if firstEvent.data[groupIdx].start > 5 then
+                    TotalFrameTime = TotalFrameTime + diff
+                end
             end
 
             if lastEvent.data[groupIdx].stop == -math.huge or firstEvent.data[groupIdx].start == -math.huge then
