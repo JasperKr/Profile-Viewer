@@ -1,27 +1,11 @@
 local ffi = require "ffi"
-local header
 local wordCache = {}
 
-local love_os = love.system.getOS()
-
-local profileFullPath
-local profilerPath
-
-if love_os == "Windows" then
-    profilerPath = "/LOVE/Rhodium/profiler.csv"
-    local appdata = assert(os.getenv("APPDATA"))
-    profileFullPath = (appdata .. profilerPath):gsub("\\", "/")
-elseif love_os == "Linux" then
-    local home = assert(os.getenv("HOME"))
-    profilerPath = "/.local/share/love/Rhodium/profiler.csv"
-    profileFullPath = home .. profilerPath
-end
-
-
 local mountDirectory = "Profile/"
+ProfilePath = Stringh.sanitise(ProfilePath)
 
-local profileDir = Stringh.directory(profileFullPath)
-local path = (mountDirectory .. Stringh.filename(profileFullPath)):gsub("\\", "/")
+local profileDir = Stringh.directory(ProfilePath)
+local path = (mountDirectory .. Stringh.filename(ProfilePath)):gsub("\\", "/")
 
 ---@diagnostic disable-next-line: undefined-field
 assert(love.filesystem.mountFullPath(profileDir, mountDirectory, "read"))

@@ -8,15 +8,51 @@ require("guiStyle")
 table.clear = require("table.clear")
 table.new = require("table.new")
 
-require("load")
-require("postProcess")
-
 local SummaryMode = false
 
+local last = {}
+local viewRanges = {}
+local sortByString
+
+local keyToGraph = nil
+
 function love.load(args)
-    if args[1] == "-generate-summary-texture" then
-        SummaryMode = true
+    for i, arg in ipairs(args) do
+        if arg == "-generate-summary-texture" then
+            SummaryMode = true
+        elseif i == #args then
+            ProfilePath = arg
+        end
     end
+
+    require("load")
+    require("postProcess")
+
+    UpdateSelectionStatistics()
+
+    for groupIdx, group in ipairs(Groups) do
+        last[group.name] = 0
+
+        local low, high = Percentiles[group.name].low, Percentiles[group.name].high
+
+        viewRanges[group.name] = { min = low, max = high, offset = -low, scale = 1 / (high - low) }
+    end
+
+    sortByString = Groups[1] and Groups[1].name or error("No groups found")
+    local best = 1
+    local score = 0
+
+    for groupIdx, group in ipairs(Groups) do
+        if group.name == "time" then
+            best = groupIdx
+            score = 2
+        elseif group.type == "time" and score < 1 then
+            best = groupIdx
+            score = 1
+        end
+    end
+
+    keyToGraph = Groups[best].name
 end
 
 local screenPos = Imgui.ImVec2_Float(0, 0)
@@ -76,7 +112,7 @@ local function clamp(val, min, max)
     return math.max(min, math.min(max, val))
 end
 
-local function updateSelectionStatistics()
+function UpdateSelectionStatistics()
     table.clear(selectionEventInfoByName)
     selectionTotalEventCount = 0
 
@@ -150,7 +186,6 @@ end
 
 local previousStart = -1
 local previousEnd = -1
-updateSelectionStatistics()
 
 local function handleDrag(frameXStart, frameXEnd, frameCount, floor)
     local mx, my = love.mouse.getPosition()
@@ -207,7 +242,7 @@ local function handleDrag(frameXStart, frameXEnd, frameCount, floor)
 
     if previousStart ~= selectedFrameRange[1]
         or previousEnd ~= selectedFrameRange[2] then
-        updateSelectionStatistics()
+        UpdateSelectionStatistics()
     end
 
     previousStart = selectedFrameRange[1]
@@ -525,17 +560,6 @@ local function drawFrameList(width, height)
     love.graphics.setCanvas()
 end
 
-local last = {}
-local viewRanges = {}
-
-for groupIdx, group in ipairs(Groups) do
-    last[group.name] = 0
-
-    local low, high = Percentiles[group.name].low, Percentiles[group.name].high
-
-    viewRanges[group.name] = { min = low, max = high, offset = -low, scale = 1 / (high - low) }
-end
-
 local function drawFrameGraph(width, height)
     local time = love.timer.getTime()
 
@@ -628,8 +652,6 @@ local function drawFrameGraph(width, height)
 
     love.graphics.setCanvas()
 end
-
-local sortByString = Groups[1] and Groups[1].name or error("No groups found")
 
 local function drawEventInfo(upTo)
     if selectedFrameRange[2] <= 0 then
@@ -767,20 +789,7 @@ local flags = Imgui.love.WindowFlags("NoTitleBar", "NoMove", "NoResize",
 
 local regionAvailable = Imgui.ImVec2_Float(0, 0)
 
-local keyToGraph = Groups[1].name
-local best = 1
-local score = 0
-for groupIdx, group in ipairs(Groups) do
-    if group.name == "time" then
-        best = groupIdx
-        score = 2
-    elseif group.type == "time" and score < 1 then
-        best = groupIdx
-        score = 1
-    end
-end
 
-keyToGraph = Groups[best].name
 
 local frameIdx = 0
 function love.draw()
