@@ -11,6 +11,8 @@ table.new = require("table.new")
 require("load")
 require("postProcess")
 
+PostProcessFiledata()
+
 local screenPos = Imgui.ImVec2_Float(0, 0)
 local function transformPoint(x, y)
     Imgui.GetCursorScreenPos(screenPos)
@@ -189,7 +191,7 @@ local function drawFrame(index, width, height)
     local time = love.timer.getTime()
     local frame = Frames[index]
 
-    if not frame then
+    if not frame or #frame <= 2 then
         frametimeInfo.drawFrameInfo = love.timer.getTime() - time
         return
     end
@@ -304,6 +306,15 @@ local function getFrameInfo(frame)
         frameInfoCache[frame] = info
 
         return info
+    else
+        return {
+            eventCount = 0,
+            duration = 0,
+            garbageAtEnd = 0,
+            minGarbage = 0,
+            maxGarbage = 0,
+            validGarbage = false,
+        }
     end
 end
 
@@ -489,8 +500,8 @@ local function drawEventTimingInfo()
         Imgui.SeparatorText("Event times:")
 
         for i, eventInfo in ipairs(SortedEventTimes) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
-                eventInfo.count))
+            Imgui.Text(string.format("%03d | %d: %s - %s", i, eventInfo.count, Stringh.formatTime(eventInfo.total),
+                eventInfo.name))
         end
     else
         local from = selectedFrameRange[1]
@@ -502,8 +513,8 @@ local function drawEventTimingInfo()
         Imgui.Text(string.format("Total events in selection: %d", selectionTotalEventCount))
         Imgui.SeparatorText("Event times in selection:")
         for i, eventInfo in ipairs(selectedSortedEventTimes) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name, Stringh.formatTime(eventInfo.total),
-                eventInfo.count))
+            Imgui.Text(string.format("%03d | %d: %s - %s", i, eventInfo.count, Stringh.formatTime(eventInfo.total),
+                eventInfo.name))
         end
     end
 end
@@ -513,16 +524,16 @@ local function drawEventGarbageInfo()
         Imgui.SeparatorText("Event garbage:")
 
         for i, eventInfo in ipairs(SortedEventGarbages) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                Stringh.formatBytes(eventInfo.total * 1024, false),
-                eventInfo.count))
+            Imgui.Text(string.format("%03d | %d: %s - %s", i, eventInfo.count, eventInfo.name,
+                Stringh.formatBytes(eventInfo.total * 1024, false)
+            ))
         end
     else
         Imgui.SeparatorText("Event garbage in selection:")
         for i, eventInfo in ipairs(selectedSortedEventGarbages) do
-            Imgui.Text(string.format("%d. %s - %s (%d calls)", i, eventInfo.name,
-                Stringh.formatBytes(eventInfo.total * 1024, false),
-                eventInfo.count))
+            Imgui.Text(string.format("%03d | %d: %s - %s", i, eventInfo.count, eventInfo.name,
+                Stringh.formatBytes(eventInfo.total * 1024, false)
+            ))
         end
     end
 end
@@ -577,6 +588,10 @@ local flags = Imgui.love.WindowFlags("NoTitleBar", "NoMove", "NoResize",
 
 local regionAvailable = Imgui.ImVec2_Float(0, 0)
 local minGarbage, maxGarbage
+
+function love.update()
+    UpdateGraphEvents()
+end
 
 function love.draw()
     Imgui.love.Update(love.timer.getDelta())

@@ -17,6 +17,8 @@ local function getWords(str)
         wordCache[i] = word
         i = i + 1
     end
+
+    return wordCache
 end
 
 local function lines(s)
@@ -35,43 +37,84 @@ local function lines(s)
     end
 end
 
+local function loadHeader(words)
+    header = {}
+
+    for i, word in ipairs(words) do
+        header[word] = i
+    end
+end
+
+local function loadEvent(words)
+    local name, start, stop, garbageStart, garbageEnd, type = unpack(words, 1, 6)
+    start, stop                                             = tonumber(start) or 0, tonumber(stop) or 0
+    garbageStart, garbageEnd                                = tonumber(garbageStart) or 0, tonumber(garbageEnd) or 0
+
+    local garbage                                           = garbageEnd - garbageStart
+    local duration                                          = stop - start
+
+    local event                                             = table.new(0, 8)
+    event.duration                                          = duration
+    event.start                                             = start
+    event.stop                                              = stop
+    event.name                                              = name
+    event.garbageStart                                      = garbageStart
+    event.garbageEnd                                        = garbageEnd
+    event.garbage                                           = garbage
+    event.type                                              = type
+
+    return event
+end
+
 local file = love.filesystem.openFile(path, "r")
 local filestring = file:read()
 
 Events = {}
 
-local line = 0
-for str in lines(filestring) do
-    line = line + 1
+loadHeader(getWords(lines(filestring)()))
+local secondLinePos = filestring:find("\n")
 
-    getWords(str)
-
-    if line == 1 then
-        header = {}
-
-        for i, word in ipairs(wordCache) do
-            header[word] = i
-        end
-    else
-        local name, start, stop, garbageStart, garbageEnd, type = unpack(wordCache, 1, 6)
-        start, stop                                             = tonumber(start), tonumber(stop)
-        garbageStart, garbageEnd                                = tonumber(garbageStart), tonumber(garbageEnd)
-
-        local garbage                                           = garbageEnd - garbageStart
-        local duration                                          = stop - start
-
-        local event                                             = table.new(0, 8)
-        event.duration                                          = duration
-        event.start                                             = start
-        event.stop                                              = stop
-        event.name                                              = name
-        event.garbageStart                                      = garbageStart
-        event.garbageEnd                                        = garbageEnd
-        event.garbage                                           = garbage
-        event.type                                              = type
-
+local function loadEvents(eventsStr, from, to)
+    print(from, to)
+    local clampedStr = eventsStr:sub(from, to)
+    for str in lines(clampedStr) do
+        local event = loadEvent(getWords(str))
         table.insert(Events, event)
     end
+
+    return #clampedStr
 end
 
-love.filesystem.unmountFullPath(profileDir)
+local lastPos = secondLinePos
+local modtime = 0
+local size = 0
+
+function UpdateGraphEvents()
+    local newModtime = assert(love.filesystem.getInfo(path)).modtime
+
+    if newModtime ~= modtime then
+        modtime = newModtime
+
+        local newSize = assert(love.filesystem.getInfo(path)).size
+
+        if newSize < size then
+            print("File was reset, reloading from start")
+            lastPos = secondLinePos
+            Events = {}
+            Frames = { [0] = {} }
+        end
+
+        size = newSize
+
+        local t = love.timer.getTime()
+        file = love.filesystem.openFile(path, "r")
+        filestring = file:read()
+        print("Reloaded profiler file in " .. string.format("%.2f ms", (love.timer.getTime() - t) * 1000))
+        t = love.timer.getTime()
+        loadEvents(filestring, lastPos + 1, nil)
+        lastPos = newSize
+        print("Loaded " .. #Events .. " events in " .. string.format("%.2f ms", (love.timer.getTime() - t) * 1000))
+
+        PostProcessFiledata()
+    end
+end
