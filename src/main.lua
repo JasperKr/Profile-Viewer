@@ -20,6 +20,11 @@ function love.load(args)
     for i, arg in ipairs(args) do
         if arg == "-generate-summary-texture" then
             SummaryMode = true
+
+            function love.errorhandler(msg)
+                print("Error: " .. debug.traceback(tostring(msg)))
+                love.event.quit(1)
+            end
         elseif i == #args then
             ProfilePath = arg
         end
