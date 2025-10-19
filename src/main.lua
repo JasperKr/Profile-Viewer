@@ -853,11 +853,56 @@ function love.draw()
 
     if Imgui.Begin("Frame Graph") then
         Imgui.GetContentRegionAvail(regionAvailable)
-
         ---@diagnostic disable-next-line: undefined-field
-        drawFrameGraph(regionAvailable.x, regionAvailable.y)
+        local width, height = regionAvailable.x, regionAvailable.y
 
-        Imgui.Image(frameGraphCanvas, regionAvailable)
+        local legendTextWidth = 65
+
+        drawFrameGraph(width - legendTextWidth * #Groups, height)
+
+        Imgui.Image(frameGraphCanvas,
+            Imgui.ImVec2_Float(regionAvailable.x - legendTextWidth * #Groups, regionAvailable.y))
+
+        Imgui.SameLine(0)
+
+        for _, group in ipairs(Groups) do
+            local range = viewRanges[group.name]
+
+            Imgui.BeginGroup()
+            local pos = Imgui.GetCursorScreenPos()
+            local x, y = pos.x, pos.y
+
+            Imgui.GetWindowDrawList():AddLine(
+                Imgui.ImVec2_Float(x, y),
+                Imgui.ImVec2_Float(x, y + height),
+                Imgui.ColorConvertFloat4ToU32(Imgui.ImVec4_Float(
+                    group.workingColor[1],
+                    group.workingColor[2],
+                    group.workingColor[3],
+                    group.workingColor[4] * (group.hidden[0] and hiddenGroupColorScale or 1)
+                )),
+                2.0
+            )
+
+            local legendHeight = height - Imgui.GetTextLineHeight()
+
+            for i = 0, 8 do
+                local t = i / 8
+                local yPos = y + legendHeight - t * legendHeight
+
+                local valueAtT = t / range.scale - range.offset
+                local label = formatFor(valueAtT, group.type)
+
+                Imgui.SetCursorScreenPos(Imgui.ImVec2_Float(x + 4, yPos))
+                Imgui.Text(label)
+            end
+
+            Imgui.SetCursorScreenPos(pos)
+            Imgui.Dummy(Imgui.ImVec2_Float(legendTextWidth, height))
+
+            Imgui.EndGroup()
+            Imgui.SameLine(0, 0)
+        end
     end
     Imgui.End()
 
