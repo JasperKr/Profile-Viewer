@@ -9,7 +9,7 @@ for i, event in ipairs(Events) do
             table.insert(Frames, {})
             frameIndex = frameIndex + 1
             FrameEventRangeIndices[frameIndex] = { start = i, stop = i }
-        else
+        elseif event.type == "pop" then
             FrameEventRangeIndices[frameIndex].stop = i
         end
     end
@@ -95,11 +95,14 @@ for groupName, diffs in pairs(Differences) do
             .high)
     end
 
-    while Percentiles[groupName].low == Percentiles[groupName].high do
+    local i = 0
+    while Percentiles[groupName].low == Percentiles[groupName].high and i < 10 do
         p = p / 2
 
         Percentiles[groupName].low = percentile(Differences[groupName], p)
         Percentiles[groupName].high = percentile(Differences[groupName], 100 - p)
+
+        i = i + 1
     end
 
     if Percentiles[groupName].low > 0 then

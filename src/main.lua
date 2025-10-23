@@ -84,10 +84,10 @@ end
 
 --- Format data for display based on type
 ---@param data number | integer
----@param type "time" | "byte" | "duration"
+---@param type "time" | "byte"
 ---@return string
 local function formatFor(data, type)
-    if type == "time" or type == "duration" then
+    if type == "time" then
         return Stringh.formatTime(data)
     elseif type == "byte" then
         return Stringh.formatBytes(data, false)
@@ -147,7 +147,8 @@ function UpdateSelectionStatistics()
 
             for groupIdx, group in ipairs(event.data) do
                 local groupDescription = Groups[groupIdx]
-                eventInfo[groupDescription.name] = eventInfo[groupDescription.name] + group.stop - group.start
+                local diff = group.stop - group.start
+                eventInfo[groupDescription.name] = eventInfo[groupDescription.name] + diff
             end
 
             eventInfo.count =
@@ -294,8 +295,8 @@ local function drawFrame(index, width, height, key)
 
     assert(groupIdxWithKey, "No group with name '" .. tostring(key) .. "' found")
 
-    local frameStartValue = frame[1].data[groupIdxWithKey].start
-    local frameEndValue = frame[#frame].data[groupIdxWithKey].stop
+    local frameStartValue = frame[1].data[groupIdxWithKey].start or 0
+    local frameEndValue = frame[#frame].data[groupIdxWithKey].stop or 0
 
     local frameDifference = frameEndValue - frameStartValue
 
@@ -322,7 +323,7 @@ local function drawFrame(index, width, height, key)
     love.graphics.setCanvas(frameTimelineCanvas)
     love.graphics.clear(0, 0, 0, 0)
 
-    for i = 1, 64 do
+    for i = 1, 640 do
         depthIndices[i] = 0
     end
 
@@ -336,7 +337,7 @@ local function drawFrame(index, width, height, key)
                 event.parent = stack[#stack]
             end
             table.insert(stack, event)
-        else
+        elseif event.type == "pop" then
             table.remove(stack)
         end
     end
@@ -358,7 +359,7 @@ local function drawFrame(index, width, height, key)
             depth = depth + 1
             maxDepthReached = math.max(maxDepthReached, depth)
             depthIndices[depth] = depthIndices[depth] + 1
-        else
+        elseif event.type == "pop" then
             depthIndices[depth + 1] = 0 -- reset for next use
             depth = math.max(0, depth - 1)
 
@@ -416,8 +417,9 @@ local function drawFrame(index, width, height, key)
 
             for groupIdx, group in ipairs(event.data) do
                 local gInfo = Groups[groupIdx]
+                local diff = group.stop - group.start
                 tooltipItem = tooltipItem .. string.format("%s: %s\n", gInfo.name,
-                    "Delta:" .. formatFor(group.stop - group.start, gInfo.type))
+                    "Delta:" .. formatFor(diff, gInfo.type))
             end
 
             if love.mouse.isDown(1) then
@@ -478,8 +480,8 @@ local function getFrameInfo(frame)
     if firstEvent and lastEvent then
         local groupInfo = {}
         for groupIdx, group in ipairs(Groups) do
-            local start = firstEvent.data[groupIdx].start
-            local stop = lastEvent.data[groupIdx].stop
+            local start = firstEvent.data[groupIdx].start or 0
+            local stop = lastEvent.data[groupIdx].stop or 0
             local difference = stop - start
             local min = math.min(start, stop)
             local max = math.max(start, stop)
@@ -596,10 +598,10 @@ local function drawFrameGraph(width, height)
         local lastEvent = Frames[i][#Frames[i]]
 
         for groupIdx, group in ipairs(Groups) do
-            local value = lastEvent.data[groupIdx].stop
+            local value = lastEvent.data[groupIdx].stop or 0
 
             if group.type == "time" then
-                value = value - firstEvent.data[groupIdx].start
+                value = value - (firstEvent.data[groupIdx].start or 0)
             end
 
             local range = viewRanges[group.name]
@@ -635,7 +637,7 @@ local function drawFrameGraph(width, height)
                 local gInfo = info.groupInfo[group.name]
                 tooltipItem = tooltipItem ..
                     string.format("%s: %s; %s\n", group.name,
-                        formatFor(frameAtCursor[#frameAtCursor].data[groupIdx].stop, group.type),
+                        formatFor(frameAtCursor[#frameAtCursor].data[groupIdx].stop or 0, group.type),
                         "Delta:" .. (gInfo.valid and formatFor(gInfo.difference, group.type) or "N/A"))
             end
 
