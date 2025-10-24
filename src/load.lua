@@ -1,5 +1,4 @@
 local ffi = require "ffi"
-local loadStart = love.timer.getTime()
 
 local mountDirectory = "Profile/"
 ProfilePath = Stringh.sanitise(ProfilePath)
@@ -10,28 +9,7 @@ local path = (mountDirectory .. Stringh.filename(ProfilePath)):gsub("\\", "/")
 ---@diagnostic disable-next-line: undefined-field
 assert(love.filesystem.mountFullPath(profileDir, mountDirectory, "read"))
 
---[[
-local format = { "name:name", "type:type" }
-local function addItemToFormat(name, type)
-    assert(name and type, "Name or type is nil")
-    assert(type == "time" or type == "byte", "Type must be 'time' or 'byte'")
-    table.insert(format, name .. ":" .. type .. ":start")
-    table.insert(format, name .. ":" .. type .. ":end")
-end
-]]
-
--- format might look like:
--- "name:name,type:type,time:time:start,time:time:end,memory:byte:start,memory:byte:end,graphicsMemory:byte:start,graphicsMemory:byte:end"
-
 local function generateCreateEntryFunction(format)
-    -- debug print the format
-
-    print("generateCreateEntryFunction: format =")
-    for i, f in ipairs(format) do
-        print(string.format("  [%d] name=%s, type=%s, when=%s, group=%s", i, tostring(f.name), tostring(f.type),
-            tostring(f.when), tostring(f.group)))
-    end
-
     local str = ""
     local indentation = 0
 
@@ -92,7 +70,10 @@ local function generateCreateEntryFunction(format)
 
     assert(indentation == 0, "Indentation is not zero")
 
-    return assert(assert(loadstring(str))())
+    local func = assert(assert(loadstring(str))())
+    jit.on(func)
+
+    return func
 end
 
 local colors = {
@@ -139,7 +120,6 @@ local function parseHeader(header)
     })
     for name, idx in pairs(nameToIdx) do
         idxToName[idx] = name
-        print("Mapping name '" .. name .. "' to index " .. idx)
     end
 
     Format.components = #header.format
@@ -164,40 +144,11 @@ local idxToType = {
 
 -- divide by 4 -> uint32_t size, and then by number of components per entry
 local totalComponentCount = Format.components + 2 -- +2 for name and type
-for i = 0, profileData:getSize() / (4 * totalComponentCount) - 1 do
-    local offset = i * totalComponentCount        -- No need to multiply by 4 since we're working in uint32_t indices
+local len = profileData:getSize() / 4 - 1
 
-    -- print(uintArrPtr[offset],
-    --     uintArrPtr[offset + 1],
-    --     idxToName[uintArrPtr[offset]],
-    --     idxToType[uintArrPtr[offset + 1]])
-
-    -- print(floatArrPtr[offset + 2],
-    --     floatArrPtr[offset + 3],
-    --     floatArrPtr[offset + 4],
-    --     floatArrPtr[offset + 5],
-    --     floatArrPtr[offset + 6],
-    --     floatArrPtr[offset + 7],
-    --     floatArrPtr[offset + 8]
-    -- )
-
-    if tonumber(uintArrPtr[offset]) == 0 then
-        error("Encountered event with name index 0 at entry " .. i .. ". This is invalid.")
-    end
-
-    if tonumber(uintArrPtr[offset + 1]) > 3 then
-        error("Encountered event with invalid type index " .. tonumber(uintArrPtr[offset + 1]) .. " at entry " .. i)
-    end
-
-    if tonumber(uintArrPtr[offset + 1]) == 0 then
-        error("Encountered event with invalid type index " .. tonumber(uintArrPtr[offset + 1]) .. " at entry " .. i)
-    end
-
-    local entry = Format.createEntry(uintArrPtr + offset, floatArrPtr + offset, idxToName, idxToType)
-    table.insert(Events, entry)
+for offset = 0, len, totalComponentCount do
+    table.insert(Events, Format.createEntry(uintArrPtr + offset, floatArrPtr + offset, idxToName, idxToType))
 end
-
-print("Loaded " .. #Events .. " events from profile.")
 
 ---@diagnostic disable-next-line: undefined-field
 love.filesystem.unmountFullPath(profileDir)
@@ -211,6 +162,3 @@ for i, group in ipairs(Groups) do
 
     GroupNameToIndex[group.name] = i
 end
-
-local loadEnd = love.timer.getTime()
-print(string.format("Profile loaded in %.2f seconds.", loadEnd - loadStart))
